@@ -9,12 +9,9 @@ zkvm-common = { workspace = true, features = ["std"] }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-celestia-types.workspace = true
+celestia-client.workspace = true
 jsonrpsee.workspace = true
 tokio.workspace = true
-hyper = { workspace = true, features = ["http1", "server"] }
-hyper-util = { workspace = true, features = ["tokio"] }
-http-body-util.workspace = true
 bincode.workspace = true
 sled.workspace = true
 sp1-sdk = { workspace = true, features = ["native-gnark"] }
@@ -25,9 +22,12 @@ thiserror.workspace = true
 env_logger.workspace = true
 rand.workspace = true
 rustls.workspace = true
-tokio-rustls.workspace = true
 rustls-pemfile.workspace = true
-hyper-rustls.workspace = true
+bytes.workspace = true
+pingora-core.workspace = true
+pingora-http.workspace = true
+pingora-proxy.workspace = true
+async-trait.workspace = true
 
 [features]
 default = []

@@ -1,4 +1,4 @@
-use celestia_types::state::AccAddress;
+use celestia_client::types::state::AccAddress;
 use serde::{
     Deserialize, Serialize,
     ser::{SerializeStruct, Serializer},

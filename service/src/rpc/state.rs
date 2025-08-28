@@ -1,6 +1,6 @@
 use super::tx_config::TxConfig;
-use celestia_types::blob::RawBlob;
-use celestia_types::state::{
+use celestia_client::types::blob::RawBlob;
+use celestia_client::types::state::{
     AccAddress, Address, Balance, QueryDelegationResponse, QueryRedelegationsResponse,
     QueryUnbondingDelegationResponse, RawTxResponse, Uint, ValAddress,
 };

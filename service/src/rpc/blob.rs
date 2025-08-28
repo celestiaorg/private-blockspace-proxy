@@ -3,8 +3,8 @@ use jsonrpsee::core::{StringError, async_trait};
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee::types::ErrorObjectOwned;
 
-use celestia_types::nmt::{Namespace, NamespaceProof};
-use celestia_types::{Blob, Commitment};
+use celestia_client::types::nmt::{Namespace, NamespaceProof};
+use celestia_client::types::{Blob, Commitment};
 use jsonrpsee::PendingSubscriptionSink;
 use serde::{Deserialize, Serialize};
 
