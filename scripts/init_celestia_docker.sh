@@ -22,7 +22,7 @@ initialize_node() {
       --user $(id -u):$(id -g) \
       -v "$CELESTIA_DATA_DIR:/home/celestia" \
       "$CELESTIA_DOCKER_IMAGE" \
-      /bin/celestia "$CELESTIA_NODE_TYPE" init --core.ip "$CELESTIA_NODE_CORE_IP" --p2p.network "$CELESTIA_NETWORK"
+      /bin/celestia "$CELESTIA_NODE_TYPE" init --core.ip "$CELESTIA_CORE_IP" --p2p.network "$CELESTIA_NETWORK"
       # NOTE: we need to be sure the user on the HOST owns these
       echo "NOTE: HOST user (${USER}) must own $CELESTIA_DATA_DIR created by root, so we use sudo:"
       sudo chown -R $USER:$USER $CELESTIA_DATA_DIR
@@ -57,9 +57,9 @@ update_latest_block_trusted_hash() {
   read_toml_to_export_var "Header.TrustedHash" "CELESTIA_TRUSTED_HASH" "${CELESTIA_DATA_DIR}/config.toml"
 
   if [[ -z "$CELESTIA_TRUSTED_HASH" ]]; then
-    echo "Setting Trusted Hash and block sync to most recent block from ${CELESTIA_NODE_CORE_IP}"
+    echo "Setting Trusted Hash and block sync to most recent block from ${CELESTIA_CORE_IP}"
     local header_json
-    header_json=$(curl -s "https://${CELESTIA_NODE_CORE_IP}/header")
+    header_json=$(curl -s "https://${CELESTIA_CORE_IP}/header")
 
     export CELESTIA_TRUSTED_HEIGHT=$(echo "$header_json" | jq -r '.result.header.height')
     export CELESTIA_TRUSTED_HASH=$(echo "$header_json" | jq -r '.result.header.last_block_id.hash')
@@ -80,10 +80,10 @@ update_latest_block_trusted_hash() {
 #   docker run -d \
 #     --name "$CELESTIA_NODE_NAME" \
 #     -v "$CELESTIA_DATA_DIR:/home/celestia" \
-#     -p "$CELESTIA_P2P_PORT:$CELESTIA_P2P_PORT" \
+#     -p "$CELESTIA_NODE_P2P_PORT:$CELESTIA_NODE_P2P_PORT" \
 #     -p "$CELESTIA_RPC_PORT:$CELESTIA_RPC_PORT" \
 #     "$CELESTIA_DOCKER_IMAGE" \
-#     /bin/celestia "$CELESTIA_NODE_TYPE" start --core.ip "$CELESTIA_NODE_CORE_IP" --p2p.network "$CELESTIA_NETWORK"
+#     /bin/celestia "$CELESTIA_NODE_TYPE" start --core.ip "$CELESTIA_CORE_IP" --p2p.network "$CELESTIA_NETWORK"
 # }
 
 # === MAIN EXECUTION ===

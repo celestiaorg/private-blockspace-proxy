@@ -5145,6 +5145,7 @@ dependencies = [
  "sp1-sdk",
  "thiserror 2.0.16",
  "tokio",
+ "url",
  "zkvm-common",
 ]
 

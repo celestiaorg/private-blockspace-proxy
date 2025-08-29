@@ -3,11 +3,11 @@ services:
     image: ${CELESTIA_DOCKER_IMAGE}
     container_name: ${CELESTIA_NODE_NAME}
     user: "root"  # FIXME: permissions issues with .check and .lock files
-    command: celestia ${CELESTIA_NODE_TYPE} start --core.ip ${CELESTIA_NODE_CORE_IP} --p2p.network ${CELESTIA_NETWORK}
+    command: celestia ${CELESTIA_NODE_TYPE} start --core.ip ${CELESTIA_CORE_IP} --p2p.network ${CELESTIA_NETWORK}
     volumes:
       - ${CELESTIA_DATA_DIR}:/home/celestia
     expose:
-      - "${CELESTIA_P2P_PORT}"
+      - "${CELESTIA_NODE_P2P_PORT}"
       - "${CELESTIA_RPC_PORT}"
     networks:
       - internal
@@ -46,7 +46,7 @@ services:
       - TLS_KEY_PATH=/etc/letsencrypt/live/${TLS_DOMAIN}/privkey.pem
       - RUST_LOG=pda_proxy=debug
       # docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' celestia-light-mocha-4
-      - CELESTIA_NODE_SOCKET=172.18.0.2:26658
+      - CELESTIA_NODE_IP=172.18.0.2:26658
     env_file:
       - /app/.env
     networks:

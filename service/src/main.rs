@@ -4,11 +4,13 @@ use hex::FromHex;
 use log::{debug, info, warn};
 use pingora_core::ErrorType;
 use serde_json::{Value, json};
-use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
+use url::Url;
 use zkvm_common::std_only::ZkvmOutput;
 
 use pingora_core::server::{Server, configuration::Opt};
 use pingora_core::upstreams::peer::HttpPeer;
+use pingora_core::{Error as PgError, Result as PgResult};
 use pingora_http::ResponseHeader;
 use pingora_proxy::{ProxyHttp, Session, http_proxy_service};
 
@@ -28,19 +30,17 @@ use internal::util::*;
 
 use zkvm_common::chacha;
 
-// ---------------------------- App State ----------------------------
-
 #[derive(Clone)]
 struct App {
-    // Upstream Celestia node for non-intercepted methods (e.g., blob.Get/GetAll)
-    upstream_addr: std::net::SocketAddr,
-    upstream_host: String,
+    /// Upstream Celestia node for non-intercepted methods (e.g., blob.Get/GetAll)
+    /// Require string of form "https://some-node.com:26658" - http and https are supported
+    upstream_da_node_uri: String,
 
-    // High-level Celestia client (submit mode) for signing + submitting
-    cel: Arc<CelClient>,
+    // Celestia client (submit mode) for signing + submitting
+    cel_client: Arc<CelClient>,
 
-    // Your existing runner (for proofs, encryption/decryption)
-    pda_runner: Arc<PdaRunner>,
+    // Job runner (zk proof generation)
+    job_runner: Arc<PdaRunner>,
 }
 
 struct Ctx {
@@ -62,66 +62,61 @@ impl ProxyHttp for App {
     }
 
     // Select the upstream peer for normal proxying
+    // NOTE: Assumes READ ONLY node RPC is only passthrough
     async fn upstream_peer(
         &self,
         _s: &mut Session,
         _ctx: &mut Self::CTX,
-    ) -> pingora_core::Result<Box<HttpPeer>> {
-        Ok(Box::new(HttpPeer::new(
-            self.upstream_addr,
-            false,
-            self.upstream_host.clone(),
-        )))
+    ) -> PgResult<Box<HttpPeer>> {
+        let (address, tls, sni) = parse_http_peer_from_uri(&self.upstream_da_node_uri)
+            .map_err(|e| PgError::because(ErrorType::InternalError, "parse URI", e))?;
+        Ok(Box::new(HttpPeer::new(address, tls, sni)))
     }
 
-    async fn request_filter(
-        &self,
-        s: &mut Session,
-        ctx: &mut Self::CTX,
-    ) -> pingora_core::Result<bool> {
-        // ---- read body (await) ----
+    async fn request_filter(&self, s: &mut Session, ctx: &mut Self::CTX) -> PgResult<bool> {
         let body_opt = s.read_request_body().await?;
         let Some(body) = body_opt else {
             return Ok(false);
         };
 
-        // ---- parse JSON (no await) ----
         let mut body_json: Value = match serde_json::from_slice(&body) {
             Ok(v) => v,
             Err(_) => return Ok(false),
         };
 
-        // ---- method bookkeeping (no await) ----
         let method = body_json
             .get("method")
             .and_then(|m| m.as_str())
             .unwrap_or("")
             .to_owned();
+
+        // Cache the method we saw on the request to handle response
         ctx.request_method = Some(method.clone());
 
         match method.as_str() {
             "blob.Submit" => {
-                // --------- validate/deserialize params (no await) ----------
+                debug!("blob.Submit: Intercepted!");
                 let Some(params) = body_json.get_mut("params") else {
                     return self.bad_req(s, "missing params").await;
                 };
                 let arr = params.as_array_mut().ok_or_else(|| {
-                    pingora_core::Error::explain(ErrorType::InternalError, "params not array")
+                    PgError::explain(ErrorType::InternalError, "params not array")
                 })?;
                 if arr.is_empty() {
                     return self.bad_req(s, "empty params").await;
                 }
-                let blobs_val = arr.get_mut(0).ok_or_else(|| {
-                    pingora_core::Error::explain(ErrorType::InternalError, "missing blobs")
-                })?;
+                let blobs_val = arr
+                    .get_mut(0)
+                    .ok_or_else(|| PgError::explain(ErrorType::InternalError, "missing blobs"))?;
                 let incoming_blobs: Vec<Blob> = serde_json::from_value(std::mem::take(blobs_val))
                     .map_err(|e| {
-                    pingora_core::Error::because(ErrorType::InternalError, "blob deserialize", e)
+                    PgError::because(ErrorType::InternalError, "blob deserialize", e)
                 })?;
 
-                // --------- encrypt/prove (awaits occur here; scope them) ----------
-                // All ephemeral/non-Send items (RNGs, contexts) stay within this block and are dropped
-                // before we run the non-Send submit on a local runtime.
+                debug!(
+                    "blob.Submit: Starting or checking job stats for {} blobs",
+                    incoming_blobs.len()
+                );
                 let encrypted: Vec<Blob> = {
                     let mut out = Vec::with_capacity(incoming_blobs.len());
                     for blob in incoming_blobs {
@@ -134,59 +129,45 @@ impl ProxyHttp for App {
                         };
 
                         let Some(pwv) = self
-                            .pda_runner
+                            .job_runner
                             .get_verifiable_encryption(job)
                             .await
                             .map_err(|e| {
-                                pingora_core::Error::because(
+                                PgError::because(
                                     ErrorType::Custom("ZKProofFailure"),
                                     "Proof Generation",
                                     e,
                                 )
                             })?
                         else {
+                            debug!("blob.Submit: jobs pending... call back");
                             // 202 Pending — instruct client to poll later
                             return self.pending(s).await;
                         };
 
                         let enc = bincode::serialize(&pwv).map_err(|e| {
-                            pingora_core::Error::because(
-                                ErrorType::InternalError,
-                                "Proof serialize",
-                                e,
-                            )
+                            PgError::because(ErrorType::InternalError, "Proof serialize", e)
                         })?;
 
                         let b =
                             Blob::new(blob.namespace, enc, AppVersion::latest()).map_err(|e| {
-                                pingora_core::Error::because(
-                                    ErrorType::InternalError,
-                                    "Blob Create",
-                                    e,
-                                )
+                                PgError::because(ErrorType::InternalError, "Blob Create", e)
                             })?;
                         out.push(b);
                     }
                     out // <- dropped here
                 };
 
-                // Prepare owned values for the 'static async block
+                debug!("blob.Submit: jobs finished! Submitting...");
                 let enc_owned = encrypted;
-                let client = self.cel.clone();
+                let client = self.cel_client.clone();
                 let cfg = TxConfig::default();
 
-                let submit_res = run_non_send_async(async move {
-                    // nothing captured by reference; all moved in
-                    client.blob().submit(&enc_owned, cfg).await
-                });
-
-                let tx_info = submit_res.map_err(|e| {
-                    pingora_core::Error::because(
-                        pingora_core::ErrorType::WriteError,
-                        "Blob Submit failed",
-                        e,
-                    )
-                })?;
+                let tx_info = submit_via_blocking_thread(client, enc_owned, cfg)
+                    .await
+                    .map_err(|e| {
+                        PgError::because(ErrorType::WriteError, "Blob Submit failed", e)
+                    })?;
 
                 // --------- respond JSON-RPC (await) ----------
                 let resp = json!({
@@ -206,18 +187,18 @@ impl ProxyHttp for App {
                 Ok(true)
             }
 
+            // Short-circuit filter and transparently proxy request through
             _ => Ok(false),
         }
     }
 
-    // --------- Response phase: decrypt for blob.Get / blob.GetAll ----------
     async fn response_filter(
         &self,
         _s: &mut Session,
         upstream_resp: &mut ResponseHeader,
         ctx: &mut Self::CTX,
-    ) -> pingora_core::Result<()> {
-        // If we’ll rewrite the body, remove Content-Length and switch to chunked (see example)
+    ) -> PgResult<()> {
+        // If we’ll rewrite the body, remove Content-Length and switch to chunked
         if matches!(
             ctx.request_method.as_deref(),
             Some("blob.Get" | "blob.GetAll")
@@ -237,20 +218,18 @@ impl ProxyHttp for App {
         end_of_stream: bool,
         ctx: &mut Self::CTX,
     ) -> pingora_core::Result<Option<std::time::Duration>> {
-        // Buffer body if we need to decrypt
-        if matches!(
-            ctx.request_method.as_deref(),
-            Some("blob.Get" | "blob.GetAll")
-        ) {
+        if matches!(ctx.request_method.as_deref(), Some("blob.Get" | "blob.GetAll")) {
             if let Some(b) = body {
                 ctx.buffer.extend_from_slice(b);
-                b.clear(); // drop original bytes
+                b.clear();
             }
             if end_of_stream {
-                // SAFETY: If decrypt fails we’ll just return original
-                let out = match self
-                    .try_decrypt_response(&ctx.buffer, ctx.request_method.as_deref().unwrap())
-                {
+                // Run the async decrypt *synchronously* without starting a nested runtime.
+                let out = match tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(
+                        self.try_decrypt_response(&ctx.buffer, ctx.request_method.as_deref().unwrap()),
+                    )
+                }) {
                     Ok(v) => v,
                     Err(e) => {
                         warn!("Failed to decrypt response: {e}");
@@ -265,7 +244,7 @@ impl ProxyHttp for App {
 }
 
 impl App {
-    async fn bad_req(&self, s: &mut Session, msg: &str) -> pingora_core::Result<bool> {
+    async fn bad_req(&self, s: &mut Session, msg: &str) -> PgResult<bool> {
         let payload =
             json!({ "jsonrpc":"2.0", "error": { "code": -32602, "message": msg }, "id": 1 })
                 .to_string();
@@ -277,7 +256,7 @@ impl App {
         Ok(true)
     }
 
-    async fn pending(&self, s: &mut Session) -> pingora_core::Result<bool> {
+    async fn pending(&self, s: &mut Session) -> PgResult<bool> {
         let payload = r#"{ "id": 1, "jsonrpc": "2.0", "status": "[pda-proxy] Verifiable encryption processing... Call back for result" }"#;
         let mut hdr = ResponseHeader::build(202, None).unwrap();
         hdr.insert_header("content-type", "application/json").ok();
@@ -287,68 +266,104 @@ impl App {
         Ok(true)
     }
 
-    fn try_decrypt_response(&self, body: &[u8], method: &str) -> anyhow::Result<Vec<u8>> {
-        let mut v: Value = serde_json::from_slice(body)?;
-        let result = v
-            .get_mut("result")
-            .ok_or_else(|| anyhow::anyhow!("Missing 'result'"))?;
+    pub async fn try_decrypt_response(&self, body: &[u8], method: &str) -> PgResult<Vec<u8>> {
+        let mut v: Value = serde_json::from_slice(body).map_err(|e| {
+            PgError::because(ErrorType::InternalError, "Failed to parse response JSON", e)
+        })?;
 
-        let key =
-            <[u8; 32]>::from_hex(std::env::var("ENCRYPTION_KEY").expect("Missing ENCRYPTION_KEY"))?;
+        let result = v.get_mut("result").ok_or_else(|| {
+            PgError::because(ErrorType::InternalError, "Missing 'result' in response", "")
+        })?;
 
-        // Helpers identical to your originals, inlined here:
-        fn decode_one<'a>(
-            blob: Blob,
-            key: [u8; 32],
+        let key_env = std::env::var("ENCRYPTION_KEY")
+            .map_err(|e| PgError::because(ErrorType::InternalError, "ENCRYPTION_KEY not set", e))?;
+
+        let key = <[u8; 32]>::from_hex(key_env).map_err(|e| {
+            PgError::because(ErrorType::InternalError, "Invalid ENCRYPTION_KEY hex", e)
+        })?;
+
+        let runner = self.job_runner.clone();
+
+        /// Helper to decrypt just one blob
+        async fn decrypt_one(
+            mut blob: Blob,
+            encryption_key: [u8; 32],
             runner: Arc<PdaRunner>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Blob>> + Send + 'a>>
-        {
-            Box::pin(async move {
-                let proof: SP1ProofWithPublicValues = bincode::deserialize(&blob.data)?;
-                let output = extract_verified_proof_output(&proof, runner.clone()).await?;
-                let mut buf = output.ciphertext.to_owned();
-                chacha(&key, &output.nonce, &mut buf);
-                let mut out = blob.clone();
-                out.data = buf;
-                Ok(out)
-            })
-        }
+        ) -> PgResult<Blob> {
+            let proof: SP1ProofWithPublicValues =
+                bincode::deserialize(&blob.data).map_err(|e| {
+                    PgError::because(
+                        ErrorType::InternalError,
+                        "Failed to decode SP1 proof from blob.data",
+                        e,
+                    )
+                })?;
 
-        // We need runner here; stash on self
-        let runner = self.pda_runner.clone();
-        let rt = tokio::runtime::Handle::current();
+            let output = extract_verified_proof_output(&proof, runner)
+                .await
+                .map_err(|e| {
+                    PgError::because(ErrorType::InternalError, "Failed to verify SP1 proof", e)
+                })?;
+
+            let mut buf = output.ciphertext.to_owned();
+            chacha(&encryption_key, &output.nonce, &mut buf);
+            blob.data = buf;
+            Ok(blob)
+        }
 
         match method {
             "blob.Get" => {
-                let blob: Blob = serde_json::from_value(result.clone())?;
-                let decrypted = rt.block_on(decode_one(blob, key, runner))?;
-                *result = serde_json::to_value(decrypted)?;
+                let blob: Blob = serde_json::from_value(result.clone()).map_err(|e| {
+                    PgError::because(ErrorType::InternalError, "Failed to decode Blob", e)
+                })?;
+                let decrypted = decrypt_one(blob, key, runner).await?;
+                *result = serde_json::to_value(decrypted).map_err(|e| {
+                    PgError::because(
+                        ErrorType::InternalError,
+                        "Failed to encode decrypted Blob",
+                        e,
+                    )
+                })?;
             }
-            "blob.GetAll" => {
-                let arr = result
-                    .as_array()
-                    .ok_or_else(|| anyhow::anyhow!("result not array"))?
-                    .clone();
-                let futs = arr.into_iter().map(|b| {
-                    let blob: Blob = serde_json::from_value(b).unwrap();
-                    decode_one(blob, key, runner.clone())
-                });
 
-                let mut out = Vec::new();
-                let mut set = tokio::task::JoinSet::new();
-                for f in futs {
-                    set.spawn(f);
-                }
-                while let Some(res) = rt.block_on(set.join_next()) {
-                    let blob = res.map_err(|e| anyhow::anyhow!(e))??; // JoinError -> anyhow, then inner anyhow
-                    out.push(serde_json::to_value(blob)?);
+            "blob.GetAll" => {
+                let arr = result.as_array().ok_or_else(|| {
+                    PgError::because(ErrorType::InternalError, "'result' is not an array", "")
+                })?;
+
+                // Deserialize -> decrypt sequentially -> re-serialize (keeps order, simple)
+                let mut out = Vec::with_capacity(arr.len());
+                for b in arr {
+                    let blob: Blob = serde_json::from_value(b.clone()).map_err(|e| {
+                        PgError::because(
+                            ErrorType::InternalError,
+                            "Failed to decode Blob in array",
+                            e,
+                        )
+                    })?;
+                    let dec = decrypt_one(blob, key, runner.clone()).await?;
+                    let val = serde_json::to_value(dec).map_err(|e| {
+                        PgError::because(
+                            ErrorType::InternalError,
+                            "Failed to encode decrypted Blob",
+                            e,
+                        )
+                    })?;
+                    out.push(val);
                 }
                 *result = Value::Array(out);
             }
-            _ => {}
+
+            _ => { /* no-op for other methods */ }
         }
 
-        Ok(serde_json::to_vec(&v)?)
+        serde_json::to_vec(&v).map_err(|e| {
+            PgError::because(
+                ErrorType::InternalError,
+                "Failed to serialize response JSON",
+                e,
+            )
+        })
     }
 }
 
@@ -358,11 +373,19 @@ impl App {
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    // Validate encryption key once (like your original)
+    // Resolve DNS of upstream providers of Core/App and DA nodes
+    let node_rpc = std::env::var("CELESTIA_NODE_RPC").expect("CELESTIA_NODE_RPC required");
+    let core_grpc = std::env::var("CELESTIA_CORE_GRPC").expect("CELESTIA_CORE_GRPC required");
+
+    let signer_key = <[u8; 32]>::from_hex(
+        std::env::var("CELESTIA_SIGNING_KEY").expect("Missing CELESTIA_SIGNING_KEY"),
+    )
+    .expect("CELESTIA_SIGNING_KEY must be 32 hex bytes");
+    // Validate encryption key, so further calls to use it succeed
     let _ = <[u8; 32]>::from_hex(std::env::var("ENCRYPTION_KEY").expect("Missing ENCRYPTION_KEY"))
         .expect("ENCRYPTION_KEY must be 32 hex bytes");
 
-    // DB and runners kept the same as your original
+    // Setup DB and Job runner
     let db_path = std::env::var("PDA_DB_PATH").expect("PDA_DB_PATH required");
     let db = sled::open(db_path)?;
     let config_db = db.open_tree("config")?;
@@ -388,7 +411,6 @@ async fn main() -> anyhow::Result<()> {
         job_sender.clone(),
     ));
 
-    // Warm up runner (same as your original spawns)
     {
         let runner = pda_runner.clone();
         tokio::spawn(async move {
@@ -397,7 +419,7 @@ async fn main() -> anyhow::Result<()> {
             let zk_remote = runner.clone().get_zk_client_remote().await;
             let _ = runner.get_proof_setup_local(&program_id, zk_local).await;
             let _ = runner.get_proof_setup_remote(&program_id, zk_remote).await;
-            info!("ZK client ready!");
+            info!("ZK clients ready!");
         });
     }
     {
@@ -411,7 +433,8 @@ async fn main() -> anyhow::Result<()> {
         let runner = pda_runner.clone();
         tokio::spawn(async move { runner.job_worker(job_receiver).await });
     }
-    // Restart queued jobs as before...
+
+    debug!("Restarting queued jobs");
     for (job_key, queue_data) in queue_db.iter().flatten() {
         let job: Job = bincode::deserialize(&job_key).unwrap();
         if let Ok(st) = bincode::deserialize::<JobStatus>(&queue_data) {
@@ -424,52 +447,38 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Build celestia_client in submit mode (RPC + gRPC + signer)
-    let cel = Arc::new(
+    debug!("Building Celestia client in submit mode (RPC + gRPC + signer)");
+    let cel_client = Arc::new(
         CelClient::builder()
-            .rpc_url(&std::env::var("CELESTIA_RPC_WS").unwrap_or("ws://127.0.0.1:26658".into()))
-            .grpc_url(
-                &std::env::var("CELESTIA_GRPC_HTTP").unwrap_or("http://127.0.0.1:9090".into()),
-            )
-            .private_key_hex(&std::env::var("CELESTIA_PRIVKEY_HEX")?)
+            .rpc_url(&node_rpc)
+            .grpc_url(&core_grpc)
+            // TODO: support .signer here instead of requiring privkey
+            .private_key(&signer_key)
             .build()
             .await?,
     );
-
-    // Upstream Celestia node (HTTP/WS) for *reads* and non-intercepted methods
-    let upstream_host = std::env::var("CELESTIA_NODE_HOST").unwrap_or("127.0.0.1".into());
-    let upstream_port: u16 = std::env::var("CELESTIA_NODE_PORT")
-        .unwrap_or("26658".into())
-        .parse()?;
-    let upstream_addr = (upstream_host.as_str(), upstream_port)
-        .to_socket_addrs()?
-        .next()
-        .unwrap();
+    info!("Celestia client (submit mode) ready!");
 
     // Start Pingora HTTP proxy service
     let opt = Opt::default();
     let mut server = Server::new(Some(opt))?;
     server.bootstrap();
 
-    let mut svc = http_proxy_service(
+    let mut pda_service = http_proxy_service(
         &server.configuration,
         App {
-            upstream_addr,
-            upstream_host: upstream_host.clone(),
-            cel,
-            pda_runner: pda_runner.clone(),
+            upstream_da_node_uri: node_rpc.clone(),
+            cel_client,
+            job_runner: pda_runner.clone(),
         },
     );
 
     // Listener (plain TCP). If you need TLS on Pingora, wire a TLS listener per Pingora docs.
     let listen_addr = std::env::var("PDA_SOCKET").unwrap_or("0.0.0.0:8080".into());
-    svc.add_tcp(&listen_addr);
-    server.add_service(svc);
-    info!(
-        "Listening on http://{listen_addr} (Pingora) — proxying to {upstream_host}:{upstream_port}"
-    );
+    pda_service.add_tcp(&listen_addr);
+    server.add_service(pda_service);
+    info!("Listening on http://{listen_addr} (Pingora) — proxying to {node_rpc}");
     server.run_forever();
-    // (unreachable)
 }
 
 /// Verify a proof before returning it's attested output
@@ -487,18 +496,54 @@ async fn extract_verified_proof_output<'a>(
     ZkvmOutput::from_bytes(proof.public_values.as_slice()).map_err(anyhow::Error::msg)
 }
 
-/// Helper: run a non-Send async future to completion on this thread
-fn run_non_send_async<F, T>(fut: F) -> T
-where
-    F: std::future::Future<Output = T> + 'static, // not Send
-    T: 'static,
-{
-    tokio::task::block_in_place(|| {
+/// Helper: submit a blob via a non-Send async future by blocking
+async fn submit_via_blocking_thread(
+    client: Arc<CelClient>,
+    encrypted: Vec<Blob>,
+    cfg: TxConfig,
+) -> celestia_client::Result<celestia_client::tx::TxInfo> {
+    // Move owned, Send values into the blocking closure
+    let res = tokio::task::spawn_blocking(move || {
+        // Now we're on a dedicated blocking thread (no Tokio runtime driving tasks here)
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("build current_thread runtime");
+            .expect("build rt");
         let local = tokio::task::LocalSet::new();
-        local.block_on(&rt, fut)
+
+        local.block_on(&rt, async move {
+            // This future may be !Send, but it never leaves this single thread.
+            client.blob().submit(&encrypted, cfg).await
+        })
     })
+    .await
+    .expect("JoinHandle.await failed for celestia_client.submit");
+
+    res
+}
+
+/// Parse URI string ("https://some.site:8080") into (addr, tls, sni) for `HttpPeer::new()`
+fn parse_http_peer_from_uri(uri: &str) -> anyhow::Result<(String, bool, String)> {
+    let url = Url::parse(&uri).map_err(|e| anyhow::anyhow!("\"{uri}\" invalid: {e}"))?;
+
+    // enforce supported schemes
+    let tls = match url.scheme() {
+        "http" => false,
+        "https" => true,
+        other => return Err(anyhow::anyhow!("unsupported scheme `{other}` in {uri}")),
+    };
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("missing host in {uri}"))?
+        .to_string();
+
+    let port = url
+        .port()
+        .ok_or_else(|| anyhow::anyhow!("missing port in {uri} (must be explicit)"))?;
+
+    let addr = format!("{host}:{port}");
+    let sni = host.clone(); // use host as SNI (even if IP)
+
+    Ok((addr, tls, sni))
 }
