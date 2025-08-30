@@ -30,23 +30,25 @@ use internal::util::*;
 
 use zkvm_common::chacha;
 
+// ============================== App ==============================
+
 #[derive(Clone)]
 struct App {
-    /// Upstream Celestia node for non-intercepted methods (e.g., blob.Get/GetAll)
-    /// Require string of form "https://some-node.com:26658" - http and https are supported
+    /// Upstream Celestia node for non-intercepted methods (e.g., blob.Get/GetAll).
+    /// Requires string of form "https://some-node.com:26658" - http and https are supported.
     upstream_da_node_uri: String,
 
-    // Celestia client (submit mode) for signing + submitting
+    // Celestia client (submit mode) for signing + submitting.
     cel_client: Arc<CelClient>,
 
-    // Job runner (zk proof generation)
+    // Job runner (zk proof generation).
     job_runner: Arc<PdaRunner>,
 }
 
 struct Ctx {
-    /// Buffer used if we need to rewrite the response body (e.g., decrypt)
+    /// Buffer used if we need to rewrite the response body (e.g., decrypt).
     buffer: Vec<u8>,
-    /// What method was called (so response filters know whether to decrypt)
+    /// What method was called (so response filters know whether to decrypt).
     request_method: Option<String>,
 }
 
@@ -68,12 +70,15 @@ impl ProxyHttp for App {
         _s: &mut Session,
         _ctx: &mut Self::CTX,
     ) -> PgResult<Box<HttpPeer>> {
-        let (address, tls, sni) = parse_http_peer_from_uri(&self.upstream_da_node_uri)
-            .map_err(|e| PgError::because(ErrorType::InternalError, "parse URI", e))?;
+        let (address, tls, sni) = parse_http_peer_from_uri(&self.upstream_da_node_uri)?;
         Ok(Box::new(HttpPeer::new(address, tls, sni)))
     }
 
     async fn request_filter(&self, s: &mut Session, ctx: &mut Self::CTX) -> PgResult<bool> {
+        // IMPORTANT: enable buffering BEFORE reading the body
+        // We can forward buffer if we return Ok(false)
+        s.enable_retry_buffering();
+
         let body_opt = s.read_request_body().await?;
         let Some(body) = body_opt else {
             return Ok(false);
@@ -163,11 +168,7 @@ impl ProxyHttp for App {
                 let client = self.cel_client.clone();
                 let cfg = TxConfig::default();
 
-                let tx_info = submit_via_blocking_thread(client, enc_owned, cfg)
-                    .await
-                    .map_err(|e| {
-                        PgError::because(ErrorType::WriteError, "Blob Submit failed", e)
-                    })?;
+                let tx_info = submit_via_blocking_thread(client, enc_owned, cfg).await?;
 
                 // --------- respond JSON-RPC (await) ----------
                 let resp = json!({
@@ -198,6 +199,7 @@ impl ProxyHttp for App {
         upstream_resp: &mut ResponseHeader,
         ctx: &mut Self::CTX,
     ) -> PgResult<()> {
+        debug!("response!@!!");
         // If we’ll rewrite the body, remove Content-Length and switch to chunked
         if matches!(
             ctx.request_method.as_deref(),
@@ -218,24 +220,29 @@ impl ProxyHttp for App {
         end_of_stream: bool,
         ctx: &mut Self::CTX,
     ) -> pingora_core::Result<Option<std::time::Duration>> {
-        if matches!(ctx.request_method.as_deref(), Some("blob.Get" | "blob.GetAll")) {
+        if matches!(
+            ctx.request_method.as_deref(),
+            Some("blob.Get" | "blob.GetAll")
+        ) {
             if let Some(b) = body {
                 ctx.buffer.extend_from_slice(b);
                 b.clear();
             }
             if end_of_stream {
                 // Run the async decrypt *synchronously* without starting a nested runtime.
-                let out = match tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(
-                        self.try_decrypt_response(&ctx.buffer, ctx.request_method.as_deref().unwrap()),
-                    )
-                }) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!("Failed to decrypt response: {e}");
-                        ctx.buffer.clone()
-                    }
-                };
+                let out =
+                    match tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(self.try_decrypt_response(
+                            &ctx.buffer,
+                            ctx.request_method.as_deref().unwrap(),
+                        ))
+                    }) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            warn!("Failed to decrypt response: {e}");
+                            ctx.buffer.clone()
+                        }
+                    };
                 *body = Some(Bytes::from(out));
             }
         }
@@ -284,7 +291,7 @@ impl App {
 
         let runner = self.job_runner.clone();
 
-        /// Helper to decrypt just one blob
+        // Helper to decrypt one blob (async, no boxing)
         async fn decrypt_one(
             mut blob: Blob,
             encryption_key: [u8; 32],
@@ -325,7 +332,6 @@ impl App {
                     )
                 })?;
             }
-
             "blob.GetAll" => {
                 let arr = result.as_array().ok_or_else(|| {
                     PgError::because(ErrorType::InternalError, "'result' is not an array", "")
@@ -353,7 +359,6 @@ impl App {
                 }
                 *result = Value::Array(out);
             }
-
             _ => { /* no-op for other methods */ }
         }
 
@@ -367,35 +372,93 @@ impl App {
     }
 }
 
-// ---------------------------- Boot ----------------------------
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> PgResult<()> {
     env_logger::init();
 
-    // Resolve DNS of upstream providers of Core/App and DA nodes
-    let node_rpc = std::env::var("CELESTIA_NODE_RPC").expect("CELESTIA_NODE_RPC required");
-    let core_grpc = std::env::var("CELESTIA_CORE_GRPC").expect("CELESTIA_CORE_GRPC required");
+    let pda_socket = std::env::var("PDA_SOCKET")
+        .map_err(|e| PgError::because(ErrorType::InternalError, "PDA_SOCKET required", e))?;
 
-    let signer_key = <[u8; 32]>::from_hex(
-        std::env::var("CELESTIA_SIGNING_KEY").expect("Missing CELESTIA_SIGNING_KEY"),
-    )
-    .expect("CELESTIA_SIGNING_KEY must be 32 hex bytes");
+    // Resolve DNS of upstream providers of Core/App and DA nodes
+    let node_rpc = std::env::var("CELESTIA_NODE_RPC")
+        .map_err(|e| PgError::because(ErrorType::InternalError, "CELESTIA_NODE_RPC required", e))?;
+    let core_grpc = std::env::var("CELESTIA_CORE_GRPC").map_err(|e| {
+        PgError::because(ErrorType::InternalError, "CELESTIA_CORE_GRPC required", e)
+    })?;
+
+    let signer_key_hex = std::env::var("CELESTIA_SIGNING_KEY").map_err(|e| {
+        PgError::because(ErrorType::InternalError, "Missing CELESTIA_SIGNING_KEY", e)
+    })?;
+    let signer_key = <[u8; 32]>::from_hex(signer_key_hex).map_err(|e| {
+        PgError::because(
+            ErrorType::InternalError,
+            "CELESTIA_SIGNING_KEY must be 32 hex bytes",
+            e,
+        )
+    })?;
+
     // Validate encryption key, so further calls to use it succeed
-    let _ = <[u8; 32]>::from_hex(std::env::var("ENCRYPTION_KEY").expect("Missing ENCRYPTION_KEY"))
-        .expect("ENCRYPTION_KEY must be 32 hex bytes");
+    let enc_key_hex = std::env::var("ENCRYPTION_KEY")
+        .map_err(|e| PgError::because(ErrorType::InternalError, "Missing ENCRYPTION_KEY", e))?;
+    let _ = <[u8; 32]>::from_hex(enc_key_hex).map_err(|e| {
+        PgError::because(
+            ErrorType::InternalError,
+            "ENCRYPTION_KEY must be 32 hex bytes",
+            e,
+        )
+    })?;
 
     // Setup DB and Job runner
-    let db_path = std::env::var("PDA_DB_PATH").expect("PDA_DB_PATH required");
-    let db = sled::open(db_path)?;
-    let config_db = db.open_tree("config")?;
-    let queue_db = db.open_tree("queue")?;
-    let finished_db = db.open_tree("finished")?;
+    let db_path = std::env::var("PDA_DB_PATH")
+        .map_err(|e| PgError::because(ErrorType::InternalError, "PDA_DB_PATH required", e))?;
+    let db = sled::open(&db_path)
+        .map_err(|e| PgError::because(ErrorType::InternalError, "Open sled DB", e))?;
+    let config_db = db
+        .open_tree("config")
+        .map_err(|e| PgError::because(ErrorType::InternalError, "Open sled tree: config", e))?;
+    let queue_db = db
+        .open_tree("queue")
+        .map_err(|e| PgError::because(ErrorType::InternalError, "Open sled tree: queue", e))?;
+    let finished_db = db
+        .open_tree("finished")
+        .map_err(|e| PgError::because(ErrorType::InternalError, "Open sled tree: finished", e))?;
 
-    let zk_proof_auction_timeout_remote =
-        Duration::from_secs(std::env::var("PROOF_AUCTION_TIMEOUT_SECONDS_REMOTE")?.parse()?);
-    let zk_proof_gen_timeout_remote =
-        Duration::from_secs(std::env::var("PROOF_GEN_TIMEOUT_SECONDS_REMOTE")?.parse()?);
+    let zk_proof_auction_timeout_remote = Duration::from_secs(
+        std::env::var("PROOF_AUCTION_TIMEOUT_SECONDS_REMOTE")
+            .map_err(|e| {
+                PgError::because(
+                    ErrorType::InternalError,
+                    "Missing PROOF_AUCTION_TIMEOUT_SECONDS_REMOTE",
+                    e,
+                )
+            })?
+            .parse::<u64>()
+            .map_err(|e| {
+                PgError::because(
+                    ErrorType::InternalError,
+                    "Parse PROOF_AUCTION_TIMEOUT_SECONDS_REMOTE",
+                    e,
+                )
+            })?,
+    );
+
+    let zk_proof_gen_timeout_remote = Duration::from_secs(
+        std::env::var("PROOF_GEN_TIMEOUT_SECONDS_REMOTE")
+            .map_err(|e| {
+                PgError::because(
+                    ErrorType::InternalError,
+                    "Missing PROOF_GEN_TIMEOUT_SECONDS_REMOTE",
+                    e,
+                )
+            })?
+            .parse::<u64>()
+            .map_err(|e| {
+                PgError::because(
+                    ErrorType::InternalError,
+                    "Parse PROOF_GEN_TIMEOUT_SECONDS_REMOTE",
+                    e,
+                )
+            })?,
+    );
 
     let (job_sender, job_receiver) = mpsc::unbounded_channel::<Option<Job>>();
     let pda_runner = Arc::new(PdaRunner::new(
@@ -411,29 +474,7 @@ async fn main() -> anyhow::Result<()> {
         job_sender.clone(),
     ));
 
-    {
-        let runner = pda_runner.clone();
-        tokio::spawn(async move {
-            let program_id = get_program_id().await;
-            let zk_local = runner.clone().get_zk_client_local().await;
-            let zk_remote = runner.clone().get_zk_client_remote().await;
-            let _ = runner.get_proof_setup_local(&program_id, zk_local).await;
-            let _ = runner.get_proof_setup_remote(&program_id, zk_remote).await;
-            info!("ZK clients ready!");
-        });
-    }
-    {
-        let runner = pda_runner.clone();
-        tokio::spawn(async move {
-            wait_shutdown_signals().await;
-            runner.shutdown();
-        });
-    }
-    {
-        let runner = pda_runner.clone();
-        tokio::spawn(async move { runner.job_worker(job_receiver).await });
-    }
-
+    // Restart queued jobs (sync)
     debug!("Restarting queued jobs");
     for (job_key, queue_data) in queue_db.iter().flatten() {
         let job: Job = bincode::deserialize(&job_key).unwrap();
@@ -447,19 +488,63 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    debug!("Building Celestia client in submit mode (RPC + gRPC + signer)");
-    let cel_client = Arc::new(
-        CelClient::builder()
-            .rpc_url(&node_rpc)
-            .grpc_url(&core_grpc)
-            // TODO: support .signer here instead of requiring privkey
-            .private_key(&signer_key)
+    // Dedicated background runtime thread for long-lived tasks
+    // NOTE: this is required as Pingora creates it's own Tokio runtime and it must own it.
+    {
+        let runner = pda_runner.clone();
+        let job_rx = job_receiver;
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("build background tokio runtime");
+
+            rt.block_on(async move {
+                // Warm ZK clients before entering long-lived loop
+                let program_id = get_program_id().await;
+                let zk_local = runner.clone().get_zk_client_local().await;
+                let zk_remote = runner.clone().get_zk_client_remote().await;
+                let _ = runner.get_proof_setup_local(&program_id, zk_local).await;
+                let _ = runner.get_proof_setup_remote(&program_id, zk_remote).await;
+                info!("ZK clients ready!");
+
+                // Wait for either shutdown or job_worker completion (whichever happens first)
+                tokio::select! {
+                    _ = runner.clone().job_worker(job_rx) => {},
+                    _ = async {
+                        wait_shutdown_signals().await;
+                        runner.shutdown();
+                    } => {},
+                }
+                info!("Background runtime exiting");
+            });
+        });
+    }
+
+    // Async initialization before server starts using a TEMP runtime
+    let cel_client = {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
-            .await?,
-    );
+            .map_err(|e| {
+                PgError::because(ErrorType::InternalError, "Build temp tokio runtime", e)
+            })?;
+
+        let client = rt.block_on(async {
+            CelClient::builder()
+                .rpc_url(&node_rpc)
+                .grpc_url(&core_grpc)
+                .private_key(&signer_key)
+                .build()
+                .await
+                .map_err(|e| PgError::because(ErrorType::InternalError, "Build Celestia client", e))
+        })?;
+        Arc::new(client)
+    };
     info!("Celestia client (submit mode) ready!");
 
-    // Start Pingora HTTP proxy service
+    // Start Pingora HTTP proxy service (Pingora owns its runtime)
     let opt = Opt::default();
     let mut server = Server::new(Some(opt))?;
     server.bootstrap();
@@ -474,76 +559,103 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Listener (plain TCP). If you need TLS on Pingora, wire a TLS listener per Pingora docs.
-    let listen_addr = std::env::var("PDA_SOCKET").unwrap_or("0.0.0.0:8080".into());
-    pda_service.add_tcp(&listen_addr);
+    pda_service.add_tcp(&pda_socket);
     server.add_service(pda_service);
-    info!("Listening on http://{listen_addr} (Pingora) — proxying to {node_rpc}");
+    info!("Listening on http://{pda_socket} — proxying to {node_rpc} (submit to {core_grpc})");
     server.run_forever();
 }
 
-/// Verify a proof before returning it's attested output
+// ============================== Helpers ==============================
+
+/// Verify a proof before returning its attested output
 async fn extract_verified_proof_output<'a>(
     proof: &'a SP1ProofWithPublicValues,
     runner: Arc<PdaRunner>,
-) -> anyhow::Result<ZkvmOutput<'a>> {
+) -> PgResult<ZkvmOutput<'a>> {
     let zk_client_local = runner.get_zk_client_local().await;
-    let vk = &runner
-        .get_proof_setup_local(&get_program_id().await, zk_client_local.clone())
-        .await?
-        .vk;
-    zk_client_local.verify(proof, vk)?;
 
-    ZkvmOutput::from_bytes(proof.public_values.as_slice()).map_err(anyhow::Error::msg)
+    let setup = runner
+        .get_proof_setup_local(&get_program_id().await, zk_client_local.clone())
+        .await
+        .map_err(|e| {
+            PgError::because(
+                ErrorType::InternalError,
+                "Failed to load local proof setup (vk)",
+                e,
+            )
+        })?;
+
+    zk_client_local
+        .verify(proof, &setup.vk)
+        .map_err(|e| PgError::because(ErrorType::InternalError, "Proof verification failed", e))?;
+
+    ZkvmOutput::from_bytes(proof.public_values.as_slice()).map_err(|e| {
+        PgError::because(
+            ErrorType::InternalError,
+            "Failed to decode ZkvmOutput from public values",
+            e,
+        )
+    })
 }
 
-/// Helper: submit a blob via a non-Send async future by blocking
+/// Helper: submit a blob via a non-Send async future by blocking on a background thread
 async fn submit_via_blocking_thread(
     client: Arc<CelClient>,
     encrypted: Vec<Blob>,
     cfg: TxConfig,
-) -> celestia_client::Result<celestia_client::tx::TxInfo> {
-    // Move owned, Send values into the blocking closure
+) -> PgResult<celestia_client::tx::TxInfo> {
     let res = tokio::task::spawn_blocking(move || {
-        // Now we're on a dedicated blocking thread (no Tokio runtime driving tasks here)
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("build rt");
+            .map_err(|e| {
+                PgError::because(ErrorType::InternalError, "Build single-thread runtime", e)
+            })?;
         let local = tokio::task::LocalSet::new();
-
         local.block_on(&rt, async move {
-            // This future may be !Send, but it never leaves this single thread.
-            client.blob().submit(&encrypted, cfg).await
+            client
+                .blob()
+                .submit(&encrypted, cfg)
+                .await
+                .map_err(|e| PgError::because(ErrorType::WriteError, "Blob submit failed", e))
         })
     })
     .await
-    .expect("JoinHandle.await failed for celestia_client.submit");
+    .map_err(|e| PgError::because(ErrorType::InternalError, "Join blocking submit thread", e))??;
 
-    res
+    Ok(res)
 }
 
 /// Parse URI string ("https://some.site:8080") into (addr, tls, sni) for `HttpPeer::new()`
-fn parse_http_peer_from_uri(uri: &str) -> anyhow::Result<(String, bool, String)> {
-    let url = Url::parse(&uri).map_err(|e| anyhow::anyhow!("\"{uri}\" invalid: {e}"))?;
+fn parse_http_peer_from_uri(uri: &str) -> PgResult<(String, bool, String)> {
+    let url = Url::parse(uri)
+        .map_err(|e| PgError::because(ErrorType::InternalError, "Invalid upstream URI", e))?;
 
     // enforce supported schemes
     let tls = match url.scheme() {
         "http" => false,
         "https" => true,
-        other => return Err(anyhow::anyhow!("unsupported scheme `{other}` in {uri}")),
+        other => {
+            return Err(PgError::because(
+                ErrorType::InternalError,
+                format!("Unsupported scheme `{other}`"),
+                "",
+            ));
+        }
     };
 
     let host = url
         .host_str()
-        .ok_or_else(|| anyhow::anyhow!("missing host in {uri}"))?
+        .ok_or_else(|| {
+            PgError::because(ErrorType::InternalError, "Missing host in upstream URI", "")
+        })?
         .to_string();
 
-    let port = url
-        .port()
-        .ok_or_else(|| anyhow::anyhow!("missing port in {uri} (must be explicit)"))?;
+    let port = url.port().ok_or_else(|| {
+        PgError::because(ErrorType::InternalError, "Missing port in upstream URI", "")
+    })?;
 
     let addr = format!("{host}:{port}");
     let sni = host.clone(); // use host as SNI (even if IP)
-
     Ok((addr, tls, sni))
 }

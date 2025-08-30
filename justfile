@@ -163,7 +163,8 @@ celestia-node-balance:
 # Test blob.Get for PDA Proxy
 curl-blob-get:
     curl -H "Content-Type: application/json" -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" --data '{"id": 1,"jsonrpc": "2.0", "method": "blob.Get", "params": [ 6629478, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAMJ/xGlNMdE=", "yS3XX33mc1uXkGinkTCvS9oqE0k9mtHMWTz0mwZccOc=" ] }' \
-    https://127.0.0.1:26657 \
+    http://127.0.0.1:26657 \
+    -vvv \
     --insecure | jq
 
 # https://mocha-4.celenium.io/tx/28fa01d026ac5a229e5d5472a204d290beda02ea229f6b3f42da520b00154e58?tab=messages
@@ -180,5 +181,5 @@ curl-blob-submit-with-max-gas:
     curl -H "Content-Type: application/json" \
          -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" \
          --data '{"id":1,"jsonrpc":"2.0","method":"blob.Submit","params":[[{"namespace":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAMJ/xGlNMdE=","data":"DEADB33F","share_version":0,"commitment":"aHlbp+J9yub6hw/uhK6dP8hBLR2mFy78XNRRdLf2794=","index":-1}],{"max_gas_price":0.010}]}' \
-         https://127.0.0.1:26657 \
+         http://127.0.0.1:26657 \
          --insecure | jq
