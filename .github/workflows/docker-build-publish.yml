@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   docker:
-    runs-on: dev1-l
+    runs-on: gh-solutions
 
     steps:
       - name: Checkout repository
