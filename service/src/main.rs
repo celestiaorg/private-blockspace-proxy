@@ -30,22 +30,20 @@ use internal::util::*;
 
 use zkvm_common::chacha;
 
-// ============================== App ==============================
-
 #[derive(Clone)]
 struct App {
     /// Upstream Celestia node for non-intercepted methods (e.g., blob.Get/GetAll).
     /// Requires string of form "https://some-node.com:26658" - http and https are supported.
     upstream_da_node_uri: String,
 
-    // Celestia client (submit mode) for signing + submitting.
+    /// Celestia client (submit mode) for signing + submitting.
     cel_client: Arc<CelClient>,
 
-    // Job runner (zk proof generation).
+    /// Job runner (zk proof generation).
     job_runner: Arc<PdaRunner>,
 }
 
-struct Ctx {
+struct SessionContext {
     /// Buffer used if we need to rewrite the response body (e.g., decrypt).
     buffer: Vec<u8>,
     /// What method was called (so response filters know whether to decrypt).
@@ -54,10 +52,10 @@ struct Ctx {
 
 #[async_trait]
 impl ProxyHttp for App {
-    type CTX = Ctx;
+    type CTX = SessionContext;
 
     fn new_ctx(&self) -> Self::CTX {
-        Ctx {
+        SessionContext {
             buffer: vec![],
             request_method: None,
         }
