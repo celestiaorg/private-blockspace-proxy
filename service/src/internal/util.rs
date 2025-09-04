@@ -1,6 +1,10 @@
+use http_body_util::{BodyExt, Full};
+use hyper::Error as HyperError;
+use hyper::{Response, StatusCode, body::Bytes};
+use log::{info, warn};
+use serde_json::{Value, json};
 use std::{fs, io};
 
-use log::info;
 use serde::{Deserialize, Serialize};
 use tokio::signal::{
     self,
@@ -92,8 +96,10 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 /// Load public certificate from file.
 pub fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     // Open certificate file.
-    let cert_file = fs::File::open(filename)
-        .map_err(|e| map_io_error(format!("failed to open {filename}: {e}")))?;
+    let cert_file = fs::File::open(filename).map_err(|e| {
+        let err = format!("failed to open {filename}: {e}");
+        io::Error::other(err)
+    })?;
     let mut reader = io::BufReader::new(cert_file);
 
     // Load and return certificate.
@@ -103,14 +109,59 @@ pub fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'static>>> {
 /// Load private key from file.
 pub fn load_private_key(filename: &str) -> io::Result<PrivateKeyDer<'static>> {
     // Open keyfile.
-    let keyfile = fs::File::open(filename)
-        .map_err(|e| map_io_error(format!("failed to open {filename}: {e}")))?;
+    let keyfile = fs::File::open(filename).map_err(|e| {
+        let err = format!("failed to open {filename}: {e}");
+        io::Error::other(err)
+    })?;
     let mut reader = io::BufReader::new(keyfile);
 
     // Load and return a single private key.
     rustls_pemfile::private_key(&mut reader).map(|key| key.unwrap())
 }
 
-pub fn map_io_error(err: String) -> io::Error {
-    io::Error::other(err)
+/* ---------------- Utility JSON responses ---------------- */
+
+pub type StreamBody = http_body_util::combinators::BoxBody<Bytes, HyperError>;
+
+pub fn json_response(body: Value, status: StatusCode) -> Response<StreamBody> {
+    let s = serde_json::to_string(&body).expect("serialize");
+    new_response_from(&s, status)
+}
+
+pub fn pending_response() -> Response<StreamBody> {
+    let raw_json = r#"{ "id": 1, "jsonrpc": "2.0", "status": "[pda-proxy] Verifiable encryption processing... Call back for result" }"#;
+    new_response_from(raw_json, StatusCode::ACCEPTED)
+}
+
+pub fn internal_error_response(error: &str) -> Response<StreamBody> {
+    let json_obj = json!({
+        "id": 1,
+        "jsonrpc": "2.0",
+        "error": { "message": format!("[pda-proxy] internal error: {}", error) }
+    });
+    json_response(json_obj, StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub fn bad_auth_response() -> Response<StreamBody> {
+    warn!("Missing or malformed Authorization header.");
+    let raw_json = r#"{ "id": 1, "jsonrpc": "2.0", "error": { "message": "Missing or malformed Authorization header. Expected format: Bearer <token)" } }"#;
+    new_response_from(raw_json, StatusCode::UNAUTHORIZED)
+}
+
+pub fn new_response_from(raw_json: &str, status: StatusCode) -> Response<StreamBody> {
+    let body: StreamBody = Full::new(Bytes::from(raw_json.to_owned()))
+        .map_err(|_: std::convert::Infallible| -> HyperError { unreachable!() })
+        .boxed();
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    response
+}
+
+pub fn bad_request_response(msg: &str) -> Response<StreamBody> {
+    let body = json!({
+        "id": 1,
+        "jsonrpc": "2.0",
+        "error": { "message": msg },
+    });
+    json_response(body, StatusCode::BAD_REQUEST)
 }
