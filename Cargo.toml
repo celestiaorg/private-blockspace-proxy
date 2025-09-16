@@ -49,9 +49,9 @@ sha2 = "=0.10.8"
 # TODO: update to 5.0?
 sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha2-0.10.8-sp1-4.0.0" }
 
-[patch.crates-io.celestia-client]
-git = "https://github.com/eigerco/lumina"
-rev = "28b710a4e21454313cc7449fd085b2162a47e488"
+# [patch.crates-io.celestia-client]
+# git = "https://github.com/eigerco/lumina"
+# rev = "28b710a4e21454313cc7449fd085b2162a47e488"
 
 [workspace.features]
 reproducible-elf = ["service/reproducible-elf", "zkVM/sp1/reproducible-elf"]
