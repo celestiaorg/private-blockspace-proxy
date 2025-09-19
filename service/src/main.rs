@@ -180,13 +180,13 @@ async fn main() -> Result<()> {
     debug!("Restarting unfinished jobs");
     for (job_key, queue_data) in queue_db.iter().flatten() {
         let job: Job = bincode::deserialize(&job_key).unwrap();
-        if let Ok(st) = bincode::deserialize::<JobStatus>(&queue_data) {
-            if matches!(
+        if let Ok(st) = bincode::deserialize::<JobStatus>(&queue_data)
+            && matches!(
                 st,
                 JobStatus::LocalZkProofPending | JobStatus::RemoteZkProofPending(_)
-            ) {
-                let _ = job_sender.send(Some(job));
-            }
+            )
+        {
+            let _ = job_sender.send(Some(job));
         }
     }
 
@@ -362,7 +362,7 @@ async fn main() -> Result<()> {
                                     }
 
                                     // Not Submit: forward upstream
-                                    let req = rebuild_req(parts, &body_bytes, &node_rpc_uri);
+                                    let req = rebuild_req(parts, &body_bytes, node_rpc_uri);
                                     let resp =
                                         forward_then_maybe_decrypt(da_http, method, req, runner).await;
 
