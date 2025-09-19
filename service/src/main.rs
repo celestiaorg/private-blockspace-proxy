@@ -401,7 +401,10 @@ async fn forward_then_maybe_decrypt(
                 Response::from_parts(parts, body)
             }
         }
-        Err(e) => internal_error_response(&format!("DA Client: {e}")),
+        Err(e) => {
+            warn!("DA Client connection failed: {e:?}");
+            internal_error_response(&format!("DA Client: {e}"))
+        }
     }
 }
 

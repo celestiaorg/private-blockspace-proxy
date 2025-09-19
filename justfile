@@ -134,8 +134,17 @@ mocha:
 mocha-local-auth:
     celestia light auth admin --p2p.network mocha
 
+# Check API is responsive, by using proxy (non-intercepted call)
+celestia-node-healthcheck-proxy:
+    curl -sf \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${CELESTIA_NODE_WRITE_TOKEN}" \
+      --data '{"jsonrpc":"2.0","id":1,"method":"header.SyncState","params":[]}' \
+      https://127.0.0.1:26657 \
+      --insecure | jq
+
 # Check API is responsive, required for proxy to function
-celestia-node-healthcheck:
+celestia-node-healthcheck-direct:
     curl -sf \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer ${CELESTIA_NODE_WRITE_TOKEN}" \
@@ -148,7 +157,7 @@ celestia-node-balance-for ADDR:
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer ${CELESTIA_NODE_WRITE_TOKEN}" \
       --data '{"jsonrpc":"2.0","id":1,"method":"state.BalanceForAddress","params":["{{ ADDR }}"]}' \
-      http://127.0.0.1:26658 | jq
+      http://127.0.0.1:26657 | jq
 
 # Check balance for local node
 celestia-node-balance:
