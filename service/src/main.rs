@@ -90,15 +90,8 @@ async fn main() -> Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let tls_certs = load_certs(&std::env::var("TLS_CERTS_PATH").expect("TLS_CERTS_PATH required"))?;
     let tls_key = load_private_key(&std::env::var("TLS_KEY_PATH").expect("TLS_KEY_PATH required"))?;
-    let listener = TcpListener::bind(service_socket).await?;
-    let mut server_config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(tls_certs, tls_key)?;
-    // NOTE: http/1 only
-    server_config.alpn_protocols = vec![b"http/1.1".to_vec(), b"http/1.0".to_vec()];
-    let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
-    // For forwarding requests to the upstream DA node
+    // Upstream Celestia HTTP(S) client
     let https_builder = HttpsConnectorBuilder::new().with_native_roots()?;
     let https_or_http_connector = if std::env::var("UNSAFE_HTTP_UPSTREAM").is_ok() {
         warn!("UNSAFE_HTTP_UPSTREAM — allowing HTTP for upstream Celestia connection!");
@@ -109,6 +102,15 @@ async fn main() -> Result<()> {
     let da_http: HyperClient<_, StreamBody> =
         HyperClient::builder(TokioExecutor::new()).build(https_or_http_connector);
 
+    // PDA Proxy TLS listener
+    let listener = TcpListener::bind(service_socket).await?;
+    let mut server_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(tls_certs, tls_key)?;
+    server_config.alpn_protocols = vec![b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+    let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+    // Proof Runner setup
     let zk_proof_auction_timeout_remote = Duration::from_secs(
         std::env::var("PROOF_AUCTION_TIMEOUT_SECONDS_REMOTE")
             .expect("PROOF_AUCTION_TIMEOUT_SECONDS_REMOTE required")
@@ -137,7 +139,7 @@ async fn main() -> Result<()> {
         job_sender.clone(),
     ));
 
-    // Warm ZK clients + setups
+    // Warm ZK clients
     tokio::spawn({
         let runner = pda_runner.clone();
         async move {
@@ -151,11 +153,14 @@ async fn main() -> Result<()> {
     });
 
     // Shutdown hook
+    let (stop_tx, mut stop_rx) = tokio::sync::watch::channel::<bool>(false);
     tokio::spawn({
         let runner = pda_runner.clone();
+        let stop_tx = stop_tx.clone();
         async move {
             wait_shutdown_signals().await;
             runner.shutdown();
+            let _ = stop_tx.send(true);
         }
     });
 
@@ -192,162 +197,183 @@ async fn main() -> Result<()> {
     );
     info!("Celestia client (submit mode) ready!");
 
+    // --- Start serving ---
     info!("Listening on https://{service_socket}");
+
     loop {
-        let (stream, _) = listener.accept().await?;
-        let tls_acceptor = tls_acceptor.clone();
-        let runner = pda_runner.clone();
-        let da_http = da_http.clone();
-        let cel_client = celestia_client_handle.clone();
+        tokio::select! {
+            _ = stop_rx.changed() => {
+                info!("Shutdown signal received — stopping listener accept loop");
+                break;
+            }
+            accept_res = listener.accept() => {
+                let (stream, peer) = match accept_res {
+                    Ok(t) => t,
+                    Err(e) => {
+                        error!("Accept failed: {e:?}");
+                        continue;
+                    }
+                };
 
-        tokio::spawn(async move {
-            match tls_acceptor.accept(stream).await {
-                Ok(tls_stream) => {
-                    let io = TokioIo::new(tls_stream);
+                let tls_acceptor = tls_acceptor.clone();
+                let runner = pda_runner.clone();
+                let da_http = da_http.clone();
+                let cel_client = celestia_client_handle.clone();
 
-                    let service = service_fn(move |req: Request<IncomingBody>| {
-                        let runner = runner.clone();
-                        let da_http = da_http.clone();
-                        let da_client = cel_client.clone();
+                tokio::spawn(async move {
+                    match tls_acceptor.accept(stream).await {
+                        Ok(tls_stream) => {
+                            let io = TokioIo::new(tls_stream);
 
-                        async move {
-                            // Fully buffer the JSON-RPC request so we can read the method
-                            let (parts, body_stream) = req.into_parts();
-                            let collected = match body_stream.collect().await {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    return Ok::<_, std::convert::Infallible>(
-                                        internal_error_response(&format!("Read request body: {e}")),
-                                    );
-                                }
-                            };
-                            let mut buf = collected.aggregate();
-                            let body_bytes = buf.copy_to_bytes(buf.remaining());
+                            let service = service_fn(move |req: Request<IncomingBody>| {
+                                let runner = runner.clone();
+                                let da_http = da_http.clone();
+                                let da_client = cel_client.clone();
 
-                            let body_json: Value = match serde_json::from_slice(&body_bytes) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    return Ok::<_, std::convert::Infallible>(
-                                        internal_error_response(&format!("Invalid JSON-RPC: {e}")),
-                                    );
-                                }
-                            };
-
-                            let method = body_json
-                                .get("method")
-                                .and_then(|m| m.as_str())
-                                .unwrap_or("")
-                                .to_owned();
-
-                            if method == "blob.Submit" {
-                                let blobs = match parse_submit_blobs(body_json) {
-                                    Ok(ok) => ok,
-                                    Err(e) => {
-                                        return Ok::<_, std::convert::Infallible>(
-                                            bad_request_response(&format!("{e}")),
-                                        );
-                                    }
-                                };
-
-                                // Encrypt each blob via ZK job; if any pending, return 202
-                                let mut encrypted_blobs = Vec::with_capacity(blobs.len());
-                                for blob in blobs {
-                                    let data = blob.data.clone();
-                                    let job = Job {
-                                        anchor: Anchor {
-                                            data: Sha256::digest(&data).as_slice().into(),
-                                        },
-                                        input: Input { data },
-                                    };
-
-                                    match runner.get_verifiable_encryption(job).await {
-                                        Ok(Some(pwv)) => {
-                                            let enc = match bincode::serialize(&pwv) {
-                                                Ok(b) => b,
-                                                Err(e) => {
-                                                    return Ok::<_, std::convert::Infallible>(
-                                                        internal_error_response(&format!(
-                                                            "serialize proof: {e}"
-                                                        )),
-                                                    );
-                                                }
-                                            };
-                                            let b = match Blob::new(
-                                                blob.namespace,
-                                                enc,
-                                                AppVersion::latest(),
-                                            ) {
-                                                Ok(b) => b,
-                                                Err(e) => {
-                                                    return Ok::<_, std::convert::Infallible>(
-                                                        internal_error_response(&format!(
-                                                            "Blob::new failed: {e}"
-                                                        )),
-                                                    );
-                                                }
-                                            };
-                                            encrypted_blobs.push(b);
-                                        }
-                                        Ok(None) => {
-                                            // Not ready — DO NOT FORWARD; ask client to poll again
-                                            return Ok::<_, std::convert::Infallible>(
-                                                pending_response(),
-                                            );
-                                        }
+                                async move {
+                                    // Fully buffer the JSON-RPC request so we can read the method
+                                    let (parts, body_stream) = req.into_parts();
+                                    let collected = match body_stream.collect().await {
+                                        Ok(c) => c,
                                         Err(e) => {
                                             return Ok::<_, std::convert::Infallible>(
-                                                internal_error_response(&format!(
-                                                    "proof generation: {e}"
-                                                )),
+                                                internal_error_response(&format!("Read request body: {e}")),
                                             );
                                         }
-                                    }
-                                }
+                                    };
+                                    let mut buf = collected.aggregate();
+                                    let body_bytes = buf.copy_to_bytes(buf.remaining());
 
-                                // Submit encrypted blobs locally via celestia_client
-                                match da_client
-                                    .blob()
-                                    .submit(&encrypted_blobs, TxConfig::default())
-                                    .await
-                                {
-                                    Ok(tx) => {
-                                        let body = json!({
-                                            "id": 1,
-                                            "jsonrpc": "2.0",
-                                            "result": tx,
-                                        });
-                                        return Ok::<_, std::convert::Infallible>(json_response(
-                                            body,
-                                            StatusCode::OK,
-                                        ));
+                                    let body_json: Value = match serde_json::from_slice(&body_bytes) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            return Ok::<_, std::convert::Infallible>(
+                                                internal_error_response(&format!("Invalid JSON-RPC: {e}")),
+                                            );
+                                        }
+                                    };
+
+                                    let method = body_json
+                                        .get("method")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("")
+                                        .to_owned();
+
+                                    if method == "blob.Submit" {
+                                        let blobs = match parse_submit_blobs(body_json) {
+                                            Ok(ok) => ok,
+                                            Err(e) => {
+                                                return Ok::<_, std::convert::Infallible>(
+                                                    bad_request_response(&format!("{e}")),
+                                                );
+                                            }
+                                        };
+
+                                        // Encrypt each blob via ZK job; if any pending, return 202
+                                        let mut encrypted_blobs = Vec::with_capacity(blobs.len());
+                                        for blob in blobs {
+                                            let data = blob.data.clone();
+                                            let job = Job {
+                                                anchor: Anchor {
+                                                    data: Sha256::digest(&data).as_slice().into(),
+                                                },
+                                                input: Input { data },
+                                            };
+
+                                            match runner.get_verifiable_encryption(job).await {
+                                                Ok(Some(pwv)) => {
+                                                    let enc = match bincode::serialize(&pwv) {
+                                                        Ok(b) => b,
+                                                        Err(e) => {
+                                                            return Ok::<_, std::convert::Infallible>(
+                                                                internal_error_response(&format!(
+                                                                    "serialize proof: {e}"
+                                                                )),
+                                                            );
+                                                        }
+                                                    };
+                                                    let b = match Blob::new(
+                                                        blob.namespace,
+                                                        enc,
+                                                        AppVersion::latest(),
+                                                    ) {
+                                                        Ok(b) => b,
+                                                        Err(e) => {
+                                                            return Ok::<_, std::convert::Infallible>(
+                                                                internal_error_response(&format!(
+                                                                    "Blob::new failed: {e}"
+                                                                )),
+                                                            );
+                                                        }
+                                                    };
+                                                    encrypted_blobs.push(b);
+                                                }
+                                                Ok(None) => {
+                                                    return Ok::<_, std::convert::Infallible>(
+                                                        pending_response(),
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    return Ok::<_, std::convert::Infallible>(
+                                                        internal_error_response(&format!(
+                                                            "proof generation: {e}"
+                                                        )),
+                                                    );
+                                                }
+                                            }
+                                        }
+
+                                        match da_client
+                                            .blob()
+                                            .submit(&encrypted_blobs, TxConfig::default())
+                                            .await
+                                        {
+                                            Ok(tx) => {
+                                                let body = json!({
+                                                    "id": 1,
+                                                    "jsonrpc": "2.0",
+                                                    "result": tx,
+                                                });
+                                                return Ok::<_, std::convert::Infallible>(json_response(
+                                                    body,
+                                                    StatusCode::OK,
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                return Ok::<_, std::convert::Infallible>(
+                                                    internal_error_response(&format!(
+                                                        "Blob submit failed: {e}"
+                                                    )),
+                                                );
+                                            }
+                                        }
                                     }
-                                    Err(e) => {
-                                        return Ok::<_, std::convert::Infallible>(
-                                            internal_error_response(&format!(
-                                                "Blob submit failed: {e}"
-                                            )),
-                                        );
-                                    }
+
+                                    // Not Submit: forward upstream
+                                    let req = rebuild_req(parts, &body_bytes, &node_rpc_uri);
+                                    let resp =
+                                        forward_then_maybe_decrypt(da_http, method, req, runner).await;
+
+                                    Ok::<_, std::convert::Infallible>(resp)
                                 }
+                            });
+
+                            if let Err(err) = http1::Builder::new()
+                                .keep_alive(false) // ensure curl sees EOF even without Content-Length
+                                .serve_connection(io, service)
+                                .await
+                            {
+                                error!("Failed to serve connection from {peer:?}: {err:?}");
                             }
-
-                            // Not Submit: forward upstream (request body = body_bytes we already have)
-                            let req = rebuild_req(parts, &body_bytes, &node_rpc_uri);
-                            let resp =
-                                forward_then_maybe_decrypt(da_http, method, req, runner).await;
-
-                            Ok::<_, std::convert::Infallible>(resp)
                         }
-                    });
-
-                    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                        error!("Failed to serve the connection: {err:?}");
+                        Err(e) => error!("TLS handshake failed: {e:?}"),
                     }
-                }
-                Err(e) => error!("TLS handshake failed: {e:?}"),
+                });
             }
-        });
+        }
     }
+
+    Ok(())
 }
 
 /// Streaming body handling of responses, only buffered if needed.
@@ -474,7 +500,10 @@ async fn outbound_handler(
         return Ok(Response::from_parts(parts, orig_body));
     }
 
+    // We're replacing the body with a fixed buffer; drop any hop-by-hop length hints.
     parts.headers.remove("content-length");
+    parts.headers.remove(hyper::header::TRANSFER_ENCODING);
+
     let new_body: StreamBody = Full::new(Bytes::from(serde_json::to_vec(&body_json)?))
         .map_err(|_: std::convert::Infallible| -> HyperError { unreachable!() })
         .boxed();
