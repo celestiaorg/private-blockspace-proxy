@@ -149,7 +149,7 @@ celestia-node-healthcheck-direct:
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer ${CELESTIA_NODE_WRITE_TOKEN}" \
       --data '{"jsonrpc":"2.0","id":1,"method":"header.SyncState","params":[]}' \
-      http://127.0.0.1:26658 | jq
+      $CELESTIA_NODE_RPC | jq
 
 # Check balance for any address. NOTE: MUST be a known good address, i.e.: celestia1377k5an3f94v6wyaceu0cf4nq6gk2jtpc46g7h
 celestia-node-balance-for ADDR:
@@ -165,7 +165,7 @@ celestia-node-balance:
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer ${CELESTIA_NODE_WRITE_TOKEN}" \
       --data '{"jsonrpc":"2.0","id":1,"method":"state.Balance","params":[]}' \
-      http://127.0.0.1:26658 | jq
+      $CELESTIA_NODE_RPC | jq
 
 # https://mocha-4.celenium.io/tx/28fa01d026ac5a229e5d5472a204d290beda02ea229f6b3f42da520b00154e58?tab=messages
 
@@ -180,7 +180,7 @@ curl-blob-get:
 # Test blob.Get for local light node
 curl-blob-get-passthrough:
     curl -H "Content-Type: application/json" -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" --data '{"id": 1,"jsonrpc": "2.0", "method": "blob.Get", "params": [ 6629478, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAMJ/xGlNMdE=", "yS3XX33mc1uXkGinkTCvS9oqE0k9mtHMWTz0mwZccOc=" ] }' \
-    http://127.0.0.1:26658 | jq
+    $CELESTIA_NODE_RPC | jq
 
 # https://mocha.celenium.io/tx/436f223bfa8c4adf1e1b79dde43a84918f3a50809583c57c33c1c079568b47cb?tab=messages
 

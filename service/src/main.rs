@@ -54,12 +54,17 @@ async fn main() -> Result<()> {
         let mut parts = http::uri::Parts::default();
         parts.scheme = uri.scheme().cloned();
         parts.authority = uri.authority().cloned();
-        parts.path_and_query = Some("/".parse().unwrap());
+        parts.path_and_query = uri.path_and_query().cloned();
         Uri::from_parts(parts).unwrap()
     }));
 
-    let node_write_token = std::env::var("CELESTIA_NODE_WRITE_TOKEN")
-        .expect("CELESTIA_NODE_WRITE_TOKEN env var required");
+    let node_write_token = match std::env::var("CELESTIA_NODE_WRITE_TOKEN") {
+        Ok(val) if !val.is_empty() => Some(val),
+        _ => {
+            warn!("CELESTIA_NODE_WRITE_TOKEN not used");
+            None
+        }
+    };
 
     let core_grpc_uri = std::env::var("CELESTIA_CORE_GRPC")
         .expect("CELESTIA_CORE_GRPC env var required (e.g. https://host:9090)");
@@ -94,9 +99,10 @@ async fn main() -> Result<()> {
     // Upstream Celestia HTTP(S) client
     let https_builder = HttpsConnectorBuilder::new().with_native_roots()?;
     let https_or_http_connector = if std::env::var("UNSAFE_HTTP_UPSTREAM").is_ok() {
-        warn!("UNSAFE_HTTP_UPSTREAM — allowing HTTP for upstream Celestia connection!");
+        warn!("UNSAFE_HTTP_UPSTREAM set — allowing HTTP for upstream Celestia connection!");
         https_builder.https_or_http().enable_http1().build()
     } else {
+        info!("UNSAFE_HTTP_UPSTREAM unset — forcing HTTPS for upstream connections");
         https_builder.https_only().enable_http1().build()
     };
     let da_http: HyperClient<_, StreamBody> =
@@ -185,12 +191,17 @@ async fn main() -> Result<()> {
     }
 
     // DA client (submit mode)
+    let mut builder = CelClient::builder()
+        .rpc_url(&node_rpc_uri.to_string())
+        .grpc_url(&core_grpc_uri)
+        .private_key(&signer_key);
+
+    if let Some(ref token) = node_write_token {
+        builder = builder.rpc_auth_token(token);
+    }
+
     let celestia_client_handle = Arc::new(
-        CelClient::builder()
-            .rpc_url(&node_rpc_uri.to_string())
-            .rpc_auth_token(&node_write_token)
-            .grpc_url(&core_grpc_uri)
-            .private_key(&signer_key)
+        builder
             .build()
             .await
             .expect("failed to build Celestia client"),
@@ -295,6 +306,7 @@ async fn main() -> Result<()> {
                                                     let b = match Blob::new(
                                                         blob.namespace,
                                                         enc,
+                                                        blob.signer,
                                                         AppVersion::latest(),
                                                     ) {
                                                         Ok(b) => b,

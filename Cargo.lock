@@ -1583,10 +1583,12 @@ dependencies = [
 [[package]]
 name = "celestia-client"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ff79bff4cd8d7479b2230d661f61680b8e1af428fd083b3385037e85c6dfc24"
+source = "git+https://github.com/eigerco/lumina?rev=ba3ce163135350bcc36a8ed24c02d70ff487f3f9#ba3ce163135350bcc36a8ed24c02d70ff487f3f9"
 dependencies = [
  "async-stream",
+ "async-trait",
+ "blockstore",
+ "bytes",
  "celestia-grpc",
  "celestia-proto",
  "celestia-rpc",
@@ -1594,33 +1596,36 @@ dependencies = [
  "futures-util",
  "getrandom 0.2.16",
  "hex",
+ "http 1.3.1",
+ "http-body 1.0.1",
  "jsonrpsee-core",
  "jsonrpsee-types",
  "k256",
  "serde_json",
  "tendermint",
  "thiserror 2.0.16",
- "tonic",
+ "tonic 0.13.1",
  "tonic-web-wasm-client",
  "wasm-bindgen-test",
- "zeroize",
 ]
 
 [[package]]
 name = "celestia-grpc"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1249e60176c8bcda5564167f18fed229d13a15ba4f6a5c35abd1a9f65e8e72f"
+source = "git+https://github.com/eigerco/lumina?rev=ba3ce163135350bcc36a8ed24c02d70ff487f3f9#ba3ce163135350bcc36a8ed24c02d70ff487f3f9"
 dependencies = [
  "bytes",
  "celestia-grpc-macros",
  "celestia-proto",
  "celestia-types",
+ "dyn-clone",
  "futures",
  "getrandom 0.2.16",
  "gloo-timers 0.3.0",
  "hex",
+ "http 1.3.1",
  "http-body 1.0.1",
+ "http-body-util",
  "ics23",
  "js-sys",
  "k256",
@@ -1633,17 +1638,18 @@ dependencies = [
  "tendermint-proto",
  "thiserror 1.0.69",
  "tokio",
- "tonic",
+ "tonic 0.13.1",
  "tonic-web-wasm-client",
+ "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "zeroize",
 ]
 
 [[package]]
 name = "celestia-grpc-macros"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d861f3850b5e959510f2ba43cd20453d09947802b2e480bda1c6844c21d76734"
+source = "git+https://github.com/eigerco/lumina?rev=ba3ce163135350bcc36a8ed24c02d70ff487f3f9#ba3ce163135350bcc36a8ed24c02d70ff487f3f9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1653,8 +1659,7 @@ dependencies = [
 [[package]]
 name = "celestia-proto"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6c8da7e4e1d4ae492170a9c551419e89e314c1438652bb512e00091b39bdf0b"
+source = "git+https://github.com/eigerco/lumina?rev=ba3ce163135350bcc36a8ed24c02d70ff487f3f9#ba3ce163135350bcc36a8ed24c02d70ff487f3f9"
 dependencies = [
  "bytes",
  "prost",
@@ -1664,7 +1669,7 @@ dependencies = [
  "serde",
  "subtle-encoding",
  "tendermint-proto",
- "tonic",
+ "tonic 0.13.1",
  "tonic-build",
  "wasm-bindgen",
 ]
@@ -1672,8 +1677,7 @@ dependencies = [
 [[package]]
 name = "celestia-rpc"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffa4ba3fd5eee79eeedf75668dd507428146c358e1985bec8f9e1c45a9abc91c"
+source = "git+https://github.com/eigerco/lumina?rev=ba3ce163135350bcc36a8ed24c02d70ff487f3f9#ba3ce163135350bcc36a8ed24c02d70ff487f3f9"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1690,8 +1694,7 @@ dependencies = [
 [[package]]
 name = "celestia-types"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c7d91261985b0c799a3e2a0a818509adc5a9a0fd25c480f23de97f8fe379f20"
+source = "git+https://github.com/eigerco/lumina?rev=ba3ce163135350bcc36a8ed24c02d70ff487f3f9#ba3ce163135350bcc36a8ed24c02d70ff487f3f9"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -4039,18 +4042,18 @@ checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "logos"
-version = "0.14.4"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7251356ef8cb7aec833ddf598c6cb24d17b689d20b993f9d11a3d764e34e6458"
+checksum = "ff472f899b4ec2d99161c51f60ff7075eeb3097069a36050d8037a6325eb8154"
 dependencies = [
  "logos-derive",
 ]
 
 [[package]]
 name = "logos-codegen"
-version = "0.14.4"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59f80069600c0d66734f5ff52cc42f2dabd6b29d205f333d61fd7832e9e9963f"
+checksum = "192a3a2b90b0c05b27a0b2c43eecdb7c415e29243acc3f89cc8247a5b693045c"
 dependencies = [
  "beef",
  "fnv",
@@ -4058,14 +4061,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex-syntax",
+ "rustc_version 0.4.1",
  "syn 2.0.106",
 ]
 
 [[package]]
 name = "logos-derive"
-version = "0.14.4"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24fb722b06a9dc12adb0963ed585f19fc61dc5413e6a9be9422ef92c091e731d"
+checksum = "605d9697bcd5ef3a42d38efc51541aa3d6a4a25f7ab6d1ed0da5ac632a26b470"
 dependencies = [
  "logos-codegen",
 ]
@@ -4088,8 +4092,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "lumina-utils"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e43f1559f5e0bb89979c0f3753840ca645929085ab6be2372f77391d92f2faf"
+source = "git+https://github.com/eigerco/lumina?rev=ba3ce163135350bcc36a8ed24c02d70ff487f3f9#ba3ce163135350bcc36a8ed24c02d70ff487f3f9"
 dependencies = [
  "futures",
  "gloo-timers 0.3.0",
@@ -4097,6 +4100,7 @@ dependencies = [
  "pin-project",
  "send_wrapper 0.6.0",
  "tokio",
+ "tonic 0.13.1",
  "web-time",
 ]
 
@@ -5169,13 +5173,12 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.14.7"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5edd582b62f5cde844716e66d92565d7faf7ab1445c8cebce6e00fba83ddb2"
+checksum = "37587d5a8a1b3dc9863403d084fc2254b91ab75a702207098837950767e2260b"
 dependencies = [
  "logos",
  "miette",
- "once_cell",
  "prost",
  "prost-types",
 ]
@@ -5191,9 +5194,9 @@ dependencies = [
 
 [[package]]
 name = "protox"
-version = "0.7.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f352af331bf637b8ecc720f7c87bf903d2571fa2e14a66e9b2558846864b54a"
+checksum = "424c2bd294b69c49b949f3619362bc3c5d28298cd1163b6d1a62df37c16461aa"
 dependencies = [
  "bytes",
  "miette",
@@ -5201,19 +5204,19 @@ dependencies = [
  "prost-reflect",
  "prost-types",
  "protox-parse",
- "thiserror 1.0.69",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
 name = "protox-parse"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a462d115462c080ae000c29a47f0b3985737e5d3a995fcdbcaa5c782068dde"
+checksum = "57927f9dbeeffcce7192404deee6157a640cbb3fe8ac11eabbe571565949ab75"
 dependencies = [
  "logos",
  "miette",
  "prost-types",
- "thiserror 1.0.69",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -6837,7 +6840,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "tonic",
+ "tonic 0.12.3",
  "tracing",
  "twirp-rs",
 ]
@@ -7446,10 +7449,40 @@ dependencies = [
 ]
 
 [[package]]
-name = "tonic-build"
-version = "0.12.3"
+name = "tonic"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9557ce109ea773b399c9b9e5dca39294110b74f1f342cb347a80d1fce8c26a11"
+checksum = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "h2 0.4.12",
+ "http 1.3.1",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.7.0",
+ "hyper-timeout",
+ "hyper-util",
+ "percent-encoding",
+ "pin-project",
+ "prost",
+ "rustls-native-certs 0.8.1",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-rustls 0.26.3",
+ "tokio-stream",
+ "tower 0.5.2",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic-build"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -7461,9 +7494,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-web-wasm-client"
-version = "0.6.2"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8957be1a1c7aa12d4c9d67882060dd57aed816bbc553fa60949312e839f4a8ea"
+checksum = "66e3bb7acca55e6790354be650f4042d418fcf8e2bc42ac382348f2b6bf057e5"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -7475,8 +7508,8 @@ dependencies = [
  "httparse",
  "js-sys",
  "pin-project",
- "thiserror 1.0.69",
- "tonic",
+ "thiserror 2.0.16",
+ "tonic 0.13.1",
  "tower-service",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -7512,9 +7545,12 @@ checksum = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9"
 dependencies = [
  "futures-core",
  "futures-util",
+ "indexmap 2.11.4",
  "pin-project-lite",
+ "slab",
  "sync_wrapper",
  "tokio",
+ "tokio-util",
  "tower-layer",
  "tower-service",
  "tracing",
