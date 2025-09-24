@@ -197,6 +197,8 @@ async fn main() -> Result<()> {
         .private_key(&signer_key);
 
     if let Some(ref token) = node_write_token {
+        // NOTE: we assume same token for core and node endpoints
+        builder = builder.grpc_metadata("x-token", token);
         builder = builder.rpc_auth_token(token);
     }
 
