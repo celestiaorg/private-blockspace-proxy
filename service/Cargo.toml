@@ -29,7 +29,6 @@ rustls.workspace = true
 tokio-rustls.workspace = true
 rustls-pemfile.workspace = true
 hyper-rustls.workspace = true
-url.workspace = true
 
 [features]
 default = []

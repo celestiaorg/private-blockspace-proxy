@@ -4958,7 +4958,6 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tokio-rustls 0.26.3",
- "url",
  "zkvm-common",
 ]
 
