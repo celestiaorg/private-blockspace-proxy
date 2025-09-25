@@ -1649,8 +1649,9 @@ dependencies = [
 
 [[package]]
 name = "celestia-client"
-version = "0.1.2"
-source = "git+https://github.com/eigerco/lumina?rev=d1669d176488225c0401306348b02077b1bf1488#d1669d176488225c0401306348b02077b1bf1488"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d72e83ce30b07edbf5c6282f45e4a49e79242508fba516c300a642f957b84eaf"
 dependencies = [
  "async-stream",
  "blockstore",
@@ -1676,8 +1677,9 @@ dependencies = [
 
 [[package]]
 name = "celestia-grpc"
-version = "0.7.0"
-source = "git+https://github.com/eigerco/lumina?rev=d1669d176488225c0401306348b02077b1bf1488#d1669d176488225c0401306348b02077b1bf1488"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7809cf69c02b02a910bfc21a0e4b501db0d4a39d15925d1929bd7a7a88cd1ee"
 dependencies = [
  "bytes",
  "celestia-grpc-macros",
@@ -1713,8 +1715,9 @@ dependencies = [
 
 [[package]]
 name = "celestia-grpc-macros"
-version = "0.3.1"
-source = "git+https://github.com/eigerco/lumina?rev=d1669d176488225c0401306348b02077b1bf1488#d1669d176488225c0401306348b02077b1bf1488"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ef7fd561015d53344524bf35c15aee37cd12a77b4ed30fcb9d44b527a54040b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1723,8 +1726,9 @@ dependencies = [
 
 [[package]]
 name = "celestia-proto"
-version = "0.9.1"
-source = "git+https://github.com/eigerco/lumina?rev=d1669d176488225c0401306348b02077b1bf1488#d1669d176488225c0401306348b02077b1bf1488"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1a6bc833fe0048c158f4740cb4b08cbfb6f407f2bf8ff369d3f6ade932d628f"
 dependencies = [
  "bytes",
  "prost",
@@ -1741,8 +1745,9 @@ dependencies = [
 
 [[package]]
 name = "celestia-rpc"
-version = "0.13.0"
-source = "git+https://github.com/eigerco/lumina?rev=d1669d176488225c0401306348b02077b1bf1488#d1669d176488225c0401306348b02077b1bf1488"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dee1c5619076e2f1aa8cbac527138594fe2835827d2eac150610efbdbfc990fc"
 dependencies = [
  "base64 0.22.1",
  "celestia-proto",
@@ -1757,8 +1762,9 @@ dependencies = [
 
 [[package]]
 name = "celestia-types"
-version = "0.15.0"
-source = "git+https://github.com/eigerco/lumina?rev=d1669d176488225c0401306348b02077b1bf1488#d1669d176488225c0401306348b02077b1bf1488"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68d248009d2b38857ad5d0b6d6c754754132b19e836ba205bdda14631065fa98"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -3187,12 +3193,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashbrown"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
-
-[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3616,7 +3616,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.0",
+ "hashbrown 0.15.5",
  "serde",
  "serde_core",
 ]
@@ -4152,8 +4152,9 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lumina-utils"
-version = "0.3.0"
-source = "git+https://github.com/eigerco/lumina?rev=d1669d176488225c0401306348b02077b1bf1488#d1669d176488225c0401306348b02077b1bf1488"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6be0fedf4b4ddbdd34a2541f36b63daa004064b5465b7b9f52ebdc5fe1c64187"
 dependencies = [
  "futures",
  "gloo-timers 0.3.0",
