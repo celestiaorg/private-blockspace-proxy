@@ -11,12 +11,14 @@ Verifiable encryption is presently enabled via an [SP1 Zero Knowledge Proof (ZKP
 - Spin up an instance of the service: [Operate](#operate)
 - Build & troubleshoot: [Develop](#develop)
 
-## Known Limitations
+## Features
 
 Presently all HTTP requests to the proxy are transparently proxied to an upstream Celestia node, interception logic handles these JSON RPC methods:
 
-- (complete) `blob.Submit` encrypts before proxy submission
-- (not implemented)`blob.Get` proxy result is decrypted before responding
+- `blob.Submit` encrypts before proxy submission of a _signed transaction_ to upstream gRPC `app` endpoint.
+- `blob.Get` and `blob.GetAll` proxy result verifies the [Verifiable Encryption](./doc/verifiable_encryption.md) proof, and decrypts before forwarding to the client.
+
+## Known Limitations
 
 At time of writing, as it should be possible to change these limitations internally:
 
@@ -26,7 +28,6 @@ At time of writing, as it should be possible to change these limitations interna
 It's possible to change these, but requires upstream involvement:
 
 - [Max blob size on Celestia](https://docs.celestia.org/how-to-guides/submit-data#maximum-blob-size) is presently ~2MB
-- Upstream jsonrpsee en/decryption middleware feature into lumina Rust client?
 
 > Please [open an issue](https://github.com/celestiaorg/pda-proxy/issues) if you have any requests!
 
@@ -36,8 +37,8 @@ First you need to [configure](#configure) your environment and nodes.
 
 The PDA proxy depends on a connection to:
 
-1. Celestia Data Availability (DA) Node to:
-   - Submit and retrieve (verifiable encrypted) blob data.
+1. A \[self\] hosted Celestia Data Availability (DA) Node and Consensus App Node to submit and retrieve (verifiable encrypted) blob data.
+   - Easy integration with [QuickNode](https://www.quicknode.com/docs/celestia) for both nodes at one endpoint, token auth supported.
 1. (Optional) [Succinct prover network](https://docs.succinct.xyz/docs/sp1/generating-proofs/prover-network) as a provider to generate Zero-Knowledge Proofs (ZKPs) of data existing on Celestia.
    _See the [ZKP program](./zkVM/sp1/program-chacha) for details on what is proven._
    Then any HTTP1 client works to send [Celestia JSON RPC](https://docs.celestia.org/how-to-guides/submit-data#submitting-data-blobs-to-celestia) calls to the proxy:
@@ -133,6 +134,14 @@ To build and run, see [developing instructions](#develop)
 
 ### Requirements
 
+You can depend fully on providers for proving and DA nodes and run this proxy on a "potato" (any minimal cloud instance should do, the service is extremely lightweight), you likely want to self-host.
+With providers you must:
+
+- **fully trust the prover with all plaintext data** - thus no privacy is provided, and if using a prover marketplace, you likely will be revealing that plaintext to _the public_... not gonna fly with use cases for this product.
+- **fully trust the DA node to tell you the truth about DA data** - as you are not validating consensus with a light node. Likely you also need fail-over in case of DA node providers not being responsive, and blocking your interactions with DA upstream.
+
+To run fully trustless, self-hosted, set of services such that you operate your own prover and Celestia node, you need:
+
 1. A machine to run with a _minimum_ of:
 
    - NVIDIA GPU with 20GB+ of VRAM (Tested on [L4](https://www.nvidia.com/en-us/data-center/l4/))
@@ -176,6 +185,8 @@ docker pull celestiaorg/pda-proxy
 _Don't forget you need to [configure your environment](#configure)_.
 
 #### Setup Host
+
+> Note: only required for self-hosting the ZK prover.
 
 As we don't want to embed huge files, secrets, and dev only example static files, you will need to place them on the host machine in the following paths:
 
