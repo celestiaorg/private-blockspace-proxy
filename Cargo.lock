@@ -1824,7 +1824,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chacha-program"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "sha2 0.10.8",
  "sp1-zkvm",
@@ -4934,7 +4934,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "pda-proxy"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -6934,7 +6934,7 @@ dependencies = [
 
 [[package]]
 name = "sp1-util"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "clap",
  "dotenv",
@@ -8674,7 +8674,7 @@ dependencies = [
 
 [[package]]
 name = "zkvm-common"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "chacha20",
  "rand 0.9.2",
