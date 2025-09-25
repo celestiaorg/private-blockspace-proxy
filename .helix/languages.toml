@@ -8,7 +8,7 @@ auto-format = false
 linkedProjects = ["program-chacha/Cargo.toml", "service/Cargo.toml"]
 
 [language-server.rust-analyzer.config]
-checkOnSave = "false"
+checkOnSave = false
 check.overrideCommand = [
   "cargo",
   "clippy",
