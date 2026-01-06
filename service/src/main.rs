@@ -81,16 +81,16 @@ async fn main() -> Result<()> {
     )
     .expect("ENCRYPTION_KEY must be 32 bytes hex");
 
-    let db_path = std::env::var("PDA_DB_PATH").expect("PDA_DB_PATH env var required");
+    let db_path = std::env::var("PBS_DB_PATH").expect("PBS_DB_PATH env var required");
     let db = sled::open(db_path.clone())?;
     let config_db = db.open_tree("config")?;
     let queue_db = db.open_tree("queue")?;
     let finished_db = db.open_tree("finished")?;
 
-    let service_socket: SocketAddr = std::env::var("PDA_SOCKET")
-        .expect("PDA_SOCKET env var required")
+    let service_socket: SocketAddr = std::env::var("PBS_SOCKET")
+        .expect("PBS_SOCKET env var required")
         .parse()
-        .expect("PDA_SOCKET cannot parse");
+        .expect("PBS_SOCKET cannot parse");
 
     let _ = rustls::crypto::ring::default_provider().install_default();
     let tls_certs = load_certs(&std::env::var("TLS_CERTS_PATH").expect("TLS_CERTS_PATH required"))?;
@@ -108,7 +108,7 @@ async fn main() -> Result<()> {
     let da_http: HyperClient<_, StreamBody> =
         HyperClient::builder(TokioExecutor::new()).build(https_or_http_connector);
 
-    // PDA Proxy TLS listener
+    // PBS Proxy TLS listener
     let listener = TcpListener::bind(service_socket).await?;
     let mut server_config = ServerConfig::builder()
         .with_no_client_auth()
@@ -132,8 +132,8 @@ async fn main() -> Result<()> {
 
     let (job_sender, job_receiver) = mpsc::unbounded_channel::<Option<Job>>();
 
-    let pda_runner = Arc::new(PdaRunner::new(
-        PdaRunnerConfig {
+    let pbs_runner = Arc::new(PbsRunner::new(
+        PbsRunnerConfig {
             zk_proof_gen_timeout_remote,
             zk_proof_auction_timeout_remote,
         },
@@ -147,7 +147,7 @@ async fn main() -> Result<()> {
 
     // Warm ZK clients
     tokio::spawn({
-        let runner = pda_runner.clone();
+        let runner = pbs_runner.clone();
         async move {
             let program_id = get_program_id().await;
             let zk_local = runner.clone().get_zk_client_local().await;
@@ -161,7 +161,7 @@ async fn main() -> Result<()> {
     // Shutdown hook
     let (stop_tx, mut stop_rx) = tokio::sync::watch::channel::<bool>(false);
     tokio::spawn({
-        let runner = pda_runner.clone();
+        let runner = pbs_runner.clone();
         let stop_tx = stop_tx.clone();
         async move {
             wait_shutdown_signals().await;
@@ -172,7 +172,7 @@ async fn main() -> Result<()> {
 
     // Job Runner
     tokio::spawn({
-        let runner = pda_runner.clone();
+        let runner = pbs_runner.clone();
         async move { runner.job_worker(job_receiver).await }
     });
 
@@ -229,7 +229,7 @@ async fn main() -> Result<()> {
                 };
 
                 let tls_acceptor = tls_acceptor.clone();
-                let runner = pda_runner.clone();
+                let runner = pbs_runner.clone();
                 let da_http = da_http.clone();
                 let cel_client = celestia_client_handle.clone();
 
@@ -398,7 +398,7 @@ async fn forward_then_maybe_decrypt(
     >,
     method: String,
     req: Request<StreamBody>,
-    runner: Arc<PdaRunner>,
+    runner: Arc<PbsRunner>,
 ) -> Response<StreamBody> {
     match da_http.request(req).await {
         Ok(resp) => {
@@ -453,7 +453,7 @@ fn rebuild_req(
 async fn outbound_handler(
     resp: Response<IncomingBody>,
     request_method: String,
-    pda_runner: Arc<PdaRunner>,
+    pbs_runner: Arc<PbsRunner>,
 ) -> Result<Response<StreamBody>> {
     let (mut parts, body_stream) = resp.into_parts();
     let collected = body_stream.collect().await?;
@@ -485,7 +485,7 @@ async fn outbound_handler(
         match request_method.as_str() {
             "blob.Get" => {
                 let blob: Blob = serde_json::from_value(result_raw.clone())?;
-                let plain = verify_decrypt_blob(blob, key, pda_runner.clone()).await?;
+                let plain = verify_decrypt_blob(blob, key, pbs_runner.clone()).await?;
                 *result_raw = serde_json::to_value(plain)?;
             }
             "blob.GetAll" => {
@@ -497,7 +497,7 @@ async fn outbound_handler(
                 let mut out = Vec::with_capacity(arr.len());
                 for b in arr {
                     let blob: Blob = serde_json::from_value(b)?;
-                    let plain = verify_decrypt_blob(blob, key, pda_runner.clone()).await?;
+                    let plain = verify_decrypt_blob(blob, key, pbs_runner.clone()).await?;
                     out.push(serde_json::to_value(plain)?);
                 }
                 *result_raw = Value::Array(out);
@@ -531,14 +531,14 @@ async fn outbound_handler(
 async fn verify_decrypt_blob(
     mut blob: Blob,
     key: [u8; 32],
-    pda_runner: Arc<PdaRunner>,
+    pbs_runner: Arc<PbsRunner>,
 ) -> Result<Blob, anyhow::Error> {
     let proof: SP1ProofWithPublicValues = bincode::deserialize(&blob.data)?;
     let output = {
         let proof: &SP1ProofWithPublicValues = &proof;
         async move {
-            let zk_client_local = pda_runner.get_zk_client_local().await;
-            let vk = &pda_runner
+            let zk_client_local = pbs_runner.get_zk_client_local().await;
+            let vk = &pbs_runner
                 .get_proof_setup_local(&get_program_id().await, zk_client_local.clone())
                 .await?
                 .vk;

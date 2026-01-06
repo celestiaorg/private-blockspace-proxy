@@ -1,4 +1,4 @@
-use crate::{Job, JobStatus, PdaRunnerError, SP1ProofSetup, SuccNetProgramId, internal::util};
+use crate::{Job, JobStatus, PbsRunnerError, SP1ProofSetup, SuccNetProgramId, internal::util};
 
 use hex::FromHex;
 use log::{debug, error, info, warn};
@@ -40,8 +40,8 @@ pub async fn get_program_id() -> SuccNetProgramId {
 
 static CHACHA_SETUP: OnceCell<Arc<SP1ProofSetup>> = OnceCell::const_new();
 
-/// Configuration for the PDA Runner
-pub struct PdaRunnerConfig {
+/// Configuration for the PBS Runner
+pub struct PbsRunnerConfig {
     /// Timeout in seconds for onchain auction to win a prover to process
     pub zk_proof_auction_timeout_remote: Duration,
     /// Timeout in seconds for prover network proof generation
@@ -49,8 +49,8 @@ pub struct PdaRunnerConfig {
 }
 
 /// The main service runner.
-pub struct PdaRunner {
-    pub config: PdaRunnerConfig,
+pub struct PbsRunner {
+    pub config: PbsRunnerConfig,
     pub config_db: SledTree,
     pub queue_db: SledTree,
     pub finished_db: SledTree,
@@ -59,11 +59,11 @@ pub struct PdaRunner {
     zk_client_handle_remote: OnceCell<Arc<SP1NetworkProver>>,
 }
 
-impl PdaRunner {
+impl PbsRunner {
     /// As we need a [OnceCell] internal to this struct, you must use `new`
     /// to correctly construct it.
     pub fn new(
-        config: PdaRunnerConfig,
+        config: PbsRunnerConfig,
         zk_client_handle_local: OnceCell<Arc<SP1EnvProver>>,
         zk_client_handle_remote: OnceCell<Arc<SP1NetworkProver>>,
         config_db: SledTree,
@@ -71,7 +71,7 @@ impl PdaRunner {
         finished_db: SledTree,
         job_sender: mpsc::UnboundedSender<Option<Job>>,
     ) -> Self {
-        PdaRunner {
+        PbsRunner {
             config,
             zk_client_handle_local,
             zk_client_handle_remote,
@@ -82,25 +82,25 @@ impl PdaRunner {
         }
     }
 
-    /// The main method: sending a [Job] to this PDA Runner.
+    /// The main method: sending a [Job] to this PBS Runner.
     /// If Job is finished, returns Ok(Some(Proof)),
     /// or Ok(None) if we don't have one (yet, likely pending)
     pub async fn get_verifiable_encryption(
         &self,
         job: Job,
-    ) -> Result<Option<SP1ProofWithPublicValues>, PdaRunnerError> {
+    ) -> Result<Option<SP1ProofWithPublicValues>, PbsRunnerError> {
         let job_key = bincode::serialize(&job.anchor)
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
         info!("0x{} - Received request", hex::encode(&job_key));
 
         // Check DB for finished jobs
         if let Some(proof_data) = self
             .finished_db
             .get(&job_key)
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?
         {
             let job_status: JobStatus = bincode::deserialize(&proof_data)
-                .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
             match job_status {
                 JobStatus::ZkProofFinished(proof) => {
@@ -111,7 +111,7 @@ impl PdaRunner {
                     match maybe_status {
                         None => {
                             warn!("Job is PERMANENT FAILURE, returning status");
-                            return Err(PdaRunnerError::InternalError(format!("{error:?}")));
+                            return Err(PbsRunnerError::InternalError(format!("{error:?}")));
                         }
                         Some(retry_status) => {
                             warn!("Job is Retry-able Failure, returning status & retrying");
@@ -119,12 +119,12 @@ impl PdaRunner {
                             // for a specific [Job] by sending to the queue
                             match self.send_job_with_new_status(job_key, *retry_status, job) {
                                 Ok(_) => {
-                                    return Err(PdaRunnerError::InternalError(format!(
+                                    return Err(PbsRunnerError::InternalError(format!(
                                         "Retrying! Previous error: {error:?}"
                                     )));
                                 }
                                 Err(e) => {
-                                    return Err(PdaRunnerError::InternalError(format!(
+                                    return Err(PbsRunnerError::InternalError(format!(
                                         "PLEASE REPORT! Internal error, cannot retry: {e:?}"
                                     )));
                                 }
@@ -135,7 +135,7 @@ impl PdaRunner {
                 _ => {
                     let e = "PLEASE REPORT! Finished DB is in invalid state";
                     error!("{e}");
-                    return Err(PdaRunnerError::InternalError(e.to_string()));
+                    return Err(PbsRunnerError::InternalError(e.to_string()));
                 }
             }
         }
@@ -144,11 +144,11 @@ impl PdaRunner {
         if let Some(queue_data) = self
             .queue_db
             .get(&job_key)
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?
         {
             debug!("Job in pending queue");
             let job_status: JobStatus = bincode::deserialize(&queue_data)
-                .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
             match job_status {
                 JobStatus::LocalZkProofPending => return Ok(None),
                 JobStatus::RemoteZkProofRequesting => return Ok(None),
@@ -159,7 +159,7 @@ impl PdaRunner {
                         hex::encode(&job_key)
                     );
                     error!("{e}");
-                    return Err(PdaRunnerError::InternalError(e));
+                    return Err(PbsRunnerError::InternalError(e));
                 }
             }
         }
@@ -177,7 +177,7 @@ impl PdaRunner {
             unknown_str => {
                 let e = format!("SP1_PROVER is unknown: {unknown_str}");
                 error!("{e}");
-                return Err(PdaRunnerError::InternalError(e));
+                return Err(PbsRunnerError::InternalError(e));
             }
         };
 
@@ -185,13 +185,13 @@ impl PdaRunner {
             .insert(
                 &job_key,
                 bincode::serialize(&initial_status)
-                    .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?,
+                    .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?,
             )
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
         self.job_sender
             .send(Some(job.clone()))
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
         Ok(None)
     }
@@ -227,16 +227,16 @@ impl PdaRunner {
     }
 
     /// The main service task: produce a proof based on a [Job] requested.
-    async fn prove(&self, job: Job) -> Result<(), PdaRunnerError> {
+    async fn prove(&self, job: Job) -> Result<(), PbsRunnerError> {
         let job_key = bincode::serialize(&job.anchor)
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
         if let Some(queue_data) = self
             .queue_db
             .get(&job_key)
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?
         {
             let mut job_status: JobStatus = bincode::deserialize(&queue_data)
-                .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
             debug!("Job worker processing with starting status: {job_status:?}");
             match job_status {
                 JobStatus::RemoteZkProofRequesting => {
@@ -304,7 +304,7 @@ impl PdaRunner {
         &self,
         zk_program_elf_sha2: &[u8; 32],
         zk_client_handle: Arc<SP1EnvProver>,
-    ) -> Result<Arc<SP1ProofSetup>, PdaRunnerError> {
+    ) -> Result<Arc<SP1ProofSetup>, PbsRunnerError> {
         debug!("Getting ZK program proof setup");
         let setup = CHACHA_SETUP
             .get_or_try_init(|| async {
@@ -312,11 +312,11 @@ impl PdaRunner {
                 let precomputed_proof_setup = self
                     .config_db
                     .get(zk_program_elf_sha2)
-                    .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                    .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
                 let proof_setup = match precomputed_proof_setup { Some(precomputed) => {
                     bincode::deserialize(&precomputed)
-                        .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?
+                        .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?
                 } _ => {
                     info!(
                         "No ZK proof setup in DB for SHA2_256 = 0x{} -- generation & storing in config DB",
@@ -327,15 +327,15 @@ impl PdaRunner {
                         zk_client_handle.setup(CHACHA_ELF).into()
                     })
                     .await
-                    .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                    .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
                     self.config_db
                         .insert(
                         zk_program_elf_sha2,
                         bincode::serialize(&new_proof_setup)
-                            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?,
+                            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?,
                         )
-                        .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                        .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
                     new_proof_setup
                 }};
@@ -356,7 +356,7 @@ impl PdaRunner {
         &self,
         zk_program_elf_sha2: &[u8; 32],
         zk_client_handle: Arc<SP1NetworkProver>,
-    ) -> Result<Arc<SP1ProofSetup>, PdaRunnerError> {
+    ) -> Result<Arc<SP1ProofSetup>, PbsRunnerError> {
         debug!("Getting ZK program proof setup");
         let setup = CHACHA_SETUP
             .get_or_try_init(|| async {
@@ -364,11 +364,11 @@ impl PdaRunner {
                 let precomputed_proof_setup = self
                     .config_db
                     .get(zk_program_elf_sha2)
-                    .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                    .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
                 let proof_setup = match precomputed_proof_setup { Some(precomputed) => {
                     bincode::deserialize(&precomputed)
-                        .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?
+                        .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?
                 } _ => {
                     info!(
                         "No ZK proof setup in DB for SHA2_256 = 0x{} -- generation & storing in config DB",
@@ -379,15 +379,15 @@ impl PdaRunner {
                         zk_client_handle.setup(CHACHA_ELF).into()
                     })
                     .await
-                    .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                    .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
                     self.config_db
                         .insert(
                         zk_program_elf_sha2,
                         bincode::serialize(&new_proof_setup)
-                            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?,
+                            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?,
                         )
-                        .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+                        .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
 
                     new_proof_setup
                 }};
@@ -407,25 +407,25 @@ impl PdaRunner {
         zk_client_error: &SP1NetworkError,
         job: &Job,
         job_key: &[u8],
-    ) -> PdaRunnerError {
+    ) -> PbsRunnerError {
         error!("SP1 Client error: {zk_client_error}");
         let (e, job_status);
         match zk_client_error {
             SP1NetworkError::SimulationFailed | SP1NetworkError::RequestUnexecutable { .. } => {
-                e = PdaRunnerError::ZkClientError(format!(
+                e = PbsRunnerError::ZkClientError(format!(
                     "ZKP program critical failure: {zk_client_error} occurred for {job:?} PLEASE REPORT!"
                 ));
                 job_status = JobStatus::Failed(e.clone(), None);
             }
             SP1NetworkError::RequestUnfulfillable { .. } => {
-                e = PdaRunnerError::ZkClientError(format!(
+                e = PbsRunnerError::ZkClientError(format!(
                     "ZKP network failure: {zk_client_error} occurred for {job:?} PLEASE REPORT!"
                 ));
                 job_status = JobStatus::Failed(e.clone(), None);
             }
             SP1NetworkError::RequestTimedOut { .. }
             | SP1NetworkError::RequestAuctionTimedOut { .. } => {
-                e = PdaRunnerError::ZkClientError(format!(
+                e = PbsRunnerError::ZkClientError(format!(
                     "ZKP network: {zk_client_error} occurred for {job:?} - callback to start the job over"
                 ));
 
@@ -435,7 +435,7 @@ impl PdaRunner {
                     JobStatus::Failed(e.clone(), Some(JobStatus::RemoteZkProofRequesting.into()));
             }
             SP1NetworkError::RpcError(_) | SP1NetworkError::Other(_) => {
-                e = PdaRunnerError::ZkClientError(format!(
+                e = PbsRunnerError::ZkClientError(format!(
                     "ZKP network failure: {zk_client_error} occurred for {job:?} PLEASE REPORT!"
                 ));
                 // TODO: We cannot clone KeccakInclusionToDataRootProofInput thus we cannot insert into a JobStatus::DataAvailable(proof_input)
@@ -455,7 +455,7 @@ impl PdaRunner {
         program_id: &SuccNetProgramId,
         job: &Job,
         job_key: &[u8],
-    ) -> Result<SP1ProofWithPublicValues, PdaRunnerError> {
+    ) -> Result<SP1ProofWithPublicValues, PbsRunnerError> {
         debug!("Preparing local SP1 proving");
         let zk_client_handle = self.get_zk_client_local().await;
         let proof_setup = self
@@ -493,7 +493,7 @@ impl PdaRunner {
                     return self.handle_zk_client_error(down, job, job_key);
                 }
                 error!("Unhandled Error: {e:?}");
-                PdaRunnerError::ZkClientError(format!("Unhandled Error: {e} PLEASE REPORT"))
+                PbsRunnerError::ZkClientError(format!("Unhandled Error: {e} PLEASE REPORT"))
             })?;
         debug!("0x{} - Proof complete", hex::encode(job_key));
         Ok(proof)
@@ -504,7 +504,7 @@ impl PdaRunner {
         program_id: &SuccNetProgramId,
         job: &Job,
         job_key: &[u8],
-    ) -> Result<util::SuccNetJobId, PdaRunnerError> {
+    ) -> Result<util::SuccNetJobId, PbsRunnerError> {
         debug!("Preparing *REMOTE* SP1 proving");
         let zk_client_handle = self.get_zk_client_remote().await;
         let proof_setup = self
@@ -514,7 +514,7 @@ impl PdaRunner {
         let fs_string = std::env::var("SP1_FULFILLMENT_STRATEGY")
             .expect("Missing SP1_FULFILLMENT_STRATEGY env var");
         let strategy = FulfillmentStrategy::from_str_name(fs_string.as_str()).ok_or(
-            PdaRunnerError::InternalError("SP1_FULFILLMENT_STRATEGY env var malformed".to_string()),
+            PbsRunnerError::InternalError("SP1_FULFILLMENT_STRATEGY env var malformed".to_string()),
         )?;
 
         let mut stdin = SP1Stdin::new();
@@ -552,7 +552,7 @@ impl PdaRunner {
                 if let Some(down) = e.downcast_ref::<SP1NetworkError>() {
                     return self.handle_zk_client_error(down, job, job_key);
                 }
-                PdaRunnerError::ZkClientError(format!("Unhandled Error: {e} PLEASE REPORT"))
+                PbsRunnerError::ZkClientError(format!("Unhandled Error: {e} PLEASE REPORT"))
             })?
             .into();
 
@@ -569,7 +569,7 @@ impl PdaRunner {
         job: &Job,
         job_key: &[u8],
         request_id: util::SuccNetJobId,
-    ) -> Result<SP1ProofWithPublicValues, PdaRunnerError> {
+    ) -> Result<SP1ProofWithPublicValues, PbsRunnerError> {
         debug!(
             "Waiting for prover network auction to settle with timeout: {} seconds",
             self.config.zk_proof_auction_timeout_remote.as_secs()
@@ -592,7 +592,7 @@ impl PdaRunner {
                     return self.handle_zk_client_error(down, job, job_key);
                 }
                 error!("UNHANDLED ZK client error: {e:?}");
-                PdaRunnerError::ZkClientError(format!("Unhandled Error: {e} PLEASE REPORT"))
+                PbsRunnerError::ZkClientError(format!("Unhandled Error: {e} PLEASE REPORT"))
             })?;
 
         Ok(proof)
@@ -602,7 +602,7 @@ impl PdaRunner {
     /// This removes the job from any further processing by workers.
     /// The [JobStatus] should be success or failure only
     /// (but this is not enforced or checked at this time)
-    fn finalize_job(&self, job_key: &[u8], job_status: JobStatus) -> Result<(), PdaRunnerError> {
+    fn finalize_job(&self, job_key: &[u8], job_status: JobStatus) -> Result<(), PbsRunnerError> {
         // TODO: do we want to do a status check here? To prevent accidentally getting into a DB invalid state
         (&self.queue_db, &self.finished_db)
             .transaction(|(queue_tx, finished_tx)| {
@@ -611,9 +611,9 @@ impl PdaRunner {
                     job_key,
                     bincode::serialize(&job_status).expect("Always given serializable job status"),
                 )?;
-                Ok::<(), sled::transaction::ConflictableTransactionError<PdaRunnerError>>(())
+                Ok::<(), sled::transaction::ConflictableTransactionError<PbsRunnerError>>(())
             })
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
         Ok(())
     }
 
@@ -625,7 +625,7 @@ impl PdaRunner {
         job_key: Vec<u8>,
         update_status: JobStatus,
         job: Job,
-    ) -> Result<(), PdaRunnerError> {
+    ) -> Result<(), PbsRunnerError> {
         debug!(
             "Sending job 0x{} back with updated status: {update_status:?}",
             hex::encode(&job_key)
@@ -638,12 +638,12 @@ impl PdaRunner {
                     bincode::serialize(&update_status)
                         .expect("Always given serializable job status"),
                 )?;
-                Ok::<(), sled::transaction::ConflictableTransactionError<PdaRunnerError>>(())
+                Ok::<(), sled::transaction::ConflictableTransactionError<PbsRunnerError>>(())
             })
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))?;
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))?;
         self.job_sender
             .send(Some(job))
-            .map_err(|e| PdaRunnerError::InternalError(e.to_string()))
+            .map_err(|e| PbsRunnerError::InternalError(e.to_string()))
     }
 
     pub async fn get_zk_client_local(&self) -> Arc<SP1EnvProver> {

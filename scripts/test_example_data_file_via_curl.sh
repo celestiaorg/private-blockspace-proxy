@@ -13,4 +13,4 @@ source ../.env
         --data @- https://$TLS_DOMAIN --verbose # remote on 443
 
 # | curl -H "Content-Type: application/json" -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" \
-#          --data @- https://$PDA_SOCKET --verbose --insecure # local
+#          --data @- https://$PBS_SOCKET --verbose --insecure # local

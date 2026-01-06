@@ -1,5 +1,5 @@
 [package]
-name = "pda-proxy"
+name = "pbs-proxy"
 version.workspace = true
 edition.workspace = true
 

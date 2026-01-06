@@ -1,4 +1,4 @@
-<h1 align="center"> Verifiable Encryption</h1>
+<h1 align="center">Verifiable Encryption</h1>
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=6P7yWZ4Cshs">
@@ -13,7 +13,7 @@
 
 > “Don’t trust. Verify.”
 
-This document introduces **Verifiable Encryption (VE)** and explores how it enables **Private Data Availability (PDA)** - a transformative new primitive for secure, decentralized systems.
+This document introduces **Verifiable Encryption (VE)** and explores how it enables **Private Blockspace** - a transformative new primitive for accountable, offchain systems.
 
 ## Verifiable Encryption
 
@@ -43,9 +43,9 @@ However, not all data should be exposed to the world.
 Some datasets are **too sensitive** for full transparency.
 The challenge: **How can we ensure critical data is available, yet only selectively disclosed under prearranged conditions**?
 
-## The Power of VE + PDA
+## The Power of VE
 
-By combining **Verifiable Encryption** with **Private Data Availability**, we unlock a powerful new primitive: **auditable yet private data**.
+By combining **Verifiable Encryption** with **Private Blockspace**, we unlock a powerful new primitive: **auditable yet private data**.
 
 With integration into **existing or novel Key Management Systems (KMS)**, VE allows one to define:
 
@@ -55,30 +55,30 @@ With integration into **existing or novel Key Management Systems (KMS)**, VE all
 
 This means:
 
-- Anyone (users, smart contracts, off-chain agents) can verify that encrypted data is available and satisfies certain properties.
+- Anyone (users, smart contracts, offchain agents) can verify that encrypted data is available and satisfies certain properties.
 - Only authorized parties can decrypt and access the sensitive contents.
 
 ## Use Cases
 
 We’ve outlined a few use cases below - but would love to hear your ideas too!
-💡 [Open an issue](https://github.com/celestiaorg/pda-proxy/issues) to share feature requests or novel applications of VE and PDA.
+💡 [Open an issue](https://github.com/celestiaorg/private-blockspace-proxy/issues) to share feature requests or novel applications of Private Blockspace.
 
 ### _Programmable Privacy for Web3 dApps_
 
-VE and PDA align closely with the principles of [local-first access control](https://www.inkandswitch.com/keyhive/notebook/), enabling **secure collaboration** across decentralized applications.
+VE and Private Blockspace align closely with the principles of [local-first access control](https://www.inkandswitch.com/keyhive/notebook/), enabling **secure collaboration** across decentralized applications.
 
 In a world where chain data is globally replicated and indexed, **encryption at rest** becomes essential for access control and selective disclosure.
 
 #### Example Applications
 
-- **PDA as a database** for collaborative dApps with fine-grained access control.
+- **VE'd database** for collaborative dApps with fine-grained access control.
 - **Private rollups** with programmable cryptography, enabling [obfuscated state](https://0xparc.org/blog/programmable-cryptography-1).
 - **Private bridging and escrow** sending verifiably correct but private messages around web2 and/or web3 apps.
-- **Drop-in support** for existing DA users via a [proxy service](../README.md), simplifying migration to PDA.
+- **Drop-in support** for existing DA users via a [proxy service](../README.md), simplifying migration to Private Blockspace.
 
 ### _Trustless Data Markets_
 
-With VE, PDA, and escrow contracts you can construct protocols to build trustless exchange of data access
+With VE, Private Blockspace, and escrow contracts you can construct protocols to build trustless exchange of data access
 See the [Stock0](https://dorahacks.io/buidl/14098) media market hackathon project for some great inspiration!
 
 Here is a [diagram inspired by them](https://docs.google.com/presentation/d/1qq1QXSBcThOjaQ2OcEyS8cwNyAHs3SnC76YrBMAYENk) of an example setup of inputs for a market:
@@ -97,7 +97,7 @@ flowchart LR
 > NOTE: Celestia does _not_ guarantee that data will be available forever!
 > See [the docs on retrievability](https://docs.celestia.org/learn/retrievability#data-retrievability-and-pruning-in-celestia-node) for the latest safe assumptions to use.
 
-With PDA, sensitive data can be publicly published in encrypted form, with **predefined methods for recovery** - without revealing its contents.
+With Private Blockspace, sensitive data can be publicly published in encrypted form, with **predefined methods for recovery** - without revealing its contents.
 
 This unlocks a new class of **verifiable, resilient backups**.
 
@@ -115,13 +115,16 @@ The **anchor** acts as a bridge, connecting **any protocol** to a **proof** that
 
 ## Future Work and Research Directions
 
-While VE for PDA is still evolving, the potential is enormous.
+While VE for Private Blockspace is still evolving, the potential is enormous.
 Current implementations have limitations, but these are rapidly being addressed by:
 
-- Enabling performance improvements, **confidential compute**, and **scalable parallelization** of PDA workflows.
+- Enabling performance improvements, **confidential compute**, and **scalable parallelization** of Private Blockspace workflows.
 - **Hybrid systems** combining:
   - Trusted Execution Environments (TEEs),
   - Multi-Party Computation (MPC),
   - and Zero-Knowledge Proofs (ZKPs),
+- **Account-centric key management systems** empowering end-users to declare keys to use for VE by operators.
 
-For deeper insights, see our ongoing [research discussion here](https://docs.google.com/document/d/1XZyuOxdMm5INcHwQZOZ8ALRk_YkvicNwQHSfOVs8hoM/).
+For more, see:
+- [(Historical) research document](https://docs.google.com/document/d/1XZyuOxdMm5INcHwQZOZ8ALRk_YkvicNwQHSfOVs8hoM/)
+- [Account-centric model for Private Blockspace research discussion](https://forum.celestia.org/t/account-user-centric-private-data-avalibility/2155/)

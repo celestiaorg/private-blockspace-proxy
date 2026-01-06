@@ -66,12 +66,12 @@ build-elf-reproducible:
 
 # Run the proxy in release mode with debug logs
 run-release *FLAGS: build-elf
-    RUST_LOG=pda_proxy=debug cargo r -r -- {{ FLAGS }}
+    RUST_LOG=pbs_proxy=debug cargo r -r -- {{ FLAGS }}
 
 # Run the proxy in debug mode
 run-debug *FLAGS: build-elf
     # TODO: Add node healthcheck (e.g., curl local /health endpoint)
-    RUST_LOG=pda_proxy=debug cargo r -- {{ FLAGS }}
+    RUST_LOG=pbs_proxy=debug cargo r -- {{ FLAGS }}
 
 # Print the zkVM program viewkey (vkey)
 print-viewkey *FLAGS: build-elf
