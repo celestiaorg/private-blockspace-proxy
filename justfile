@@ -47,16 +47,16 @@ bench-cycles *FLAGS: _pre-build _pre-run
 
 # Run in release mode, zkVM ELF stable with optimizations AND debug logs
 run-release-reproducible *FLAGS: _pre-build-reproducible _pre-run
-    RUST_LOG=pda_proxy=debug cargo r -r --features reproducible-elf -- {{ FLAGS }}
+    RUST_LOG=pbs_proxy=debug cargo r -r --features reproducible-elf -- {{ FLAGS }}
 
 # Run in release mode, with optimizations AND debug logs
 run-release *FLAGS: _pre-build _pre-run
-    RUST_LOG=pda_proxy=debug cargo r -r -- {{ FLAGS }}
+    RUST_LOG=pbs_proxy=debug cargo r -r -- {{ FLAGS }}
 
 # Run in debug mode, with extra pre-checks, no optimizations
 run-debug *FLAGS: _pre-build _pre-run
     # TODO :Check DA node up with some healthcheck endpoint
-    RUST_LOG=pda_proxy=debug cargo r -- {{ FLAGS }}
+    RUST_LOG=pbs_proxy=debug cargo r -- {{ FLAGS }}
 
 # Build docker image & tag
 docker-build:
@@ -76,7 +76,7 @@ docker-load:
 
 # Run a pre-built docker image
 docker-run:
-    mkdir -p $PDA_DB_PATH
+    mkdir -p $PBS_DB_PATH
     # Note socket assumes running "normally" with docker managed by root
     # TODO: support docker rootless!
     # FIXME: files with relative paths accross .env file!
@@ -84,13 +84,13 @@ docker-run:
       -v /var/run/docker.sock:/var/run/docker.sock \
       -v ./service/static:/app/static \
       -v $HOME/.sp1/circuits:/root/.sp1/circuits \
-      -v $PDA_DB_PATH:$PDA_DB_PATH \
+      -v $PBS_DB_PATH:$PBS_DB_PATH \
       --env-file {{ env-settings }} \
       --env TLS_CERTS_PATH=/app/static/sample.pem \
       --env TLS_KEY_PATH=/app/static/sample.rsa \
-      --env RUST_LOG=pda_proxy=debug \
+      --env RUST_LOG=pbs_proxy=debug \
       --network=host \
-      -p $PDA_PORT:$PDA_PORT \
+      -p $PBS_PORT:$PBS_PORT \
       $DOCKER_CONTAINER_NAME
 
 # Build in debug mode, no optimizations
@@ -169,7 +169,7 @@ celestia-node-balance:
 
 # https://mocha-4.celenium.io/tx/28fa01d026ac5a229e5d5472a204d290beda02ea229f6b3f42da520b00154e58?tab=messages
 
-# Test blob.Get for PDA Proxy
+# Test blob.Get for PBS Proxy
 curl-blob-get:
     curl -H "Content-Type: application/json" -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" --data '{"id": 1,"jsonrpc": "2.0", "method": "blob.Get", "params": [ 6629478, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAMJ/xGlNMdE=", "yS3XX33mc1uXkGinkTCvS9oqE0k9mtHMWTz0mwZccOc=" ] }' \
     https://127.0.0.1:26657 \
@@ -184,7 +184,7 @@ curl-blob-get-passthrough:
 
 # https://mocha.celenium.io/tx/436f223bfa8c4adf1e1b79dde43a84918f3a50809583c57c33c1c079568b47cb?tab=messages
 
-# Test blob.Submit for PDA proxy, max gas price is minimum 0.0004utia
+# Test blob.Submit for PBS proxy, max gas price is minimum 0.0004utia
 curl-blob-submit-with-max-gas:
     curl -H "Content-Type: application/json" \
          -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" \

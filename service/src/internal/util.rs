@@ -129,7 +129,7 @@ pub fn json_response(body: Value, status: StatusCode) -> Response<StreamBody> {
 }
 
 pub fn pending_response() -> Response<StreamBody> {
-    let raw_json = r#"{ "id": 1, "jsonrpc": "2.0", "status": "[pda-proxy] Verifiable encryption processing... Call back for result" }"#;
+    let raw_json = r#"{ "id": 1, "jsonrpc": "2.0", "status": "[pbs-proxy] Verifiable encryption processing... Call back for result" }"#;
     new_response_from(raw_json, StatusCode::ACCEPTED)
 }
 
@@ -137,7 +137,7 @@ pub fn internal_error_response(error: &str) -> Response<StreamBody> {
     let json_obj = json!({
         "id": 1,
         "jsonrpc": "2.0",
-        "error": { "message": format!("[pda-proxy] internal error: {}", error) }
+        "error": { "message": format!("[pbs-proxy] internal error: {}", error) }
     });
     json_response(json_obj, StatusCode::INTERNAL_SERVER_ERROR)
 }

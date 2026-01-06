@@ -27,9 +27,9 @@ services:
       retries: 10
       start_period: 3s
 
-  pda-proxy:
+  pbs-proxy:
     image: ghcr.io/celestiaorg/${DOCKER_CONTAINER_NAME}:latest
-    # image: local/pda-proxy # OPTIONAL: for local development
+    # image: local/pbs-proxy # OPTIONAL: for local development
     # build: .  # OPTIONAL: for local development
     depends_on:
       celestia-node:
@@ -37,14 +37,14 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # - ./service/static:/app/static  # OPTIONAL: for local development
-      - ${PDA_DB_PATH}:${PDA_DB_PATH}
+      - ${PBS_DB_PATH}:${PBS_DB_PATH}
       - /etc/letsencrypt/live/${TLS_DOMAIN}/fullchain.pem:/etc/letsencrypt/live/${TLS_DOMAIN}/fullchain.pem
       - /etc/letsencrypt/live/${TLS_DOMAIN}/privkey.pem:/etc/letsencrypt/live/${TLS_DOMAIN}/privkey.pem
     environment:
       # NOTE: Overrides any .env settings
       - TLS_CERTS_PATH=/etc/letsencrypt/live/${TLS_DOMAIN}/fullchain.pem
       - TLS_KEY_PATH=/etc/letsencrypt/live/${TLS_DOMAIN}/privkey.pem
-      - RUST_LOG=pda_proxy=debug
+      - RUST_LOG=pbs_proxy=debug
       # docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' celestia-light-mocha-4
       - CELESTIA_NODE_SOCKET=172.18.0.2:26658
     env_file:
@@ -52,7 +52,7 @@ services:
     networks:
       - internal
     ports:
-      - "443:${PDA_PORT}"  # Public HTTPS
+      - "443:${PBS_PORT}"  # Public HTTPS
     restart: unless-stopped
 
 networks:

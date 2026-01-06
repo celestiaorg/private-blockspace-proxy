@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::PdaRunnerError;
+use crate::PbsRunnerError;
 
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
@@ -44,7 +44,7 @@ impl fmt::Debug for Anchor {
     }
 }
 
-/// Used as a [Job] state machine for the PDA service.
+/// Used as a [Job] state machine for the PBS service.
 #[derive(Serialize, Deserialize)]
 pub enum JobStatus {
     /// A ZK prover job had been started, awaiting completion
@@ -58,10 +58,10 @@ pub enum JobStatus {
     // Ideally we only want the public values + whatever is needed to verify the proof
     // They don't seem to provide a type for that.
     ZkProofFinished(SP1ProofWithPublicValues),
-    /// A wrapper for any [PdaServiceError], with:
+    /// A wrapper for any [PbsRunnerError], with:
     /// - Option = None                        --> Permanent failure
     /// - Option = Some(\<retry-able status\>) --> Retry is possible, with a JobStatus state to retry with
-    Failed(PdaRunnerError, Option<Box<JobStatus>>),
+    Failed(PbsRunnerError, Option<Box<JobStatus>>),
 }
 
 impl std::fmt::Debug for JobStatus {

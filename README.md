@@ -38,16 +38,16 @@ source .env
 # blob.Get
 curl -H "Content-Type: application/json" -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" -X POST \
      --data '{ "id": 1, "jsonrpc": "2.0", "method": "blob.Get", "params": [ 4499999, "AAAAAAAAAAAAAAAAAAAAAAAAAFHMGnPWX5X2veY=", "S2iIifIPdAjQ33KPeyfAga26FSF3IL11WsCGtJKSOTA="] }' \
-     $PDA_SOCKET
+     $PBS_SOCKET
 # blob.GetAll
 curl -H "Content-Type: application/json" -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" -X POST \
      --data '{ "id": 1, "jsonrpc": "2.0", "method": "blob.GetAll", "params": [ 4499999, [ "AAAAAAAAAAAAAAAAAAAAAAAAAFHMGnPWX5X2veY=" ] ] }' \
-     $PDA_SOCKET
+     $PBS_SOCKET
 # blob.Submit (dummy data)
 # Note: send "{}" as empty `tx_config` object, so the node uses it's default key to sign & submit to Celestia
 curl -H "Content-Type: application/json" -H "Authorization: Bearer $CELESTIA_NODE_WRITE_TOKEN" -X POST \
      --data '{ "id": 1, "jsonrpc": "2.0", "method": "blob.Submit", "params": [ [ { "namespace": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAMJ/xGlNMdE=", "data": "DEADB33F", "share_version": 0, "commitment": "aHlbp+J9yub6hw/uhK6dP8hBLR2mFy78XNRRdLf2794=", "index": -1 } ], { } ] }' \
-     https://$PDA_SOCKET \
+     https://$PBS_SOCKET \
      --verbose \
      --insecure
     # ^^^^ DO NOT use insecure TLS in real scenarios!
@@ -65,17 +65,17 @@ Celestia has many [API client libraries](https://docs.celestia.org/how-to-guides
 ```mermaid
 sequenceDiagram
     participant JSON RPC Client
-    participant PDA Proxy
+    participant PBS Proxy
     participant Celestia Node
-    JSON RPC Client->>+PDA Proxy: blob.Submit(blobs, options)<br>{AUTH_TOKEN in header}
-    PDA Proxy->>PDA Proxy: Job Processing...<br>{If no DB entry, start new zkVM Job}
-    PDA Proxy->>-JSON RPC Client: Response{"Call back"}
-    PDA Proxy->>PDA Proxy: ...Job runs to completion...
-    JSON RPC Client->>+PDA Proxy:  blob.Submit(blobs, options)<br>{AUTH_TOKEN in header}
-    PDA Proxy->>PDA Proxy: Query Job DB<br>Done!<br>{Job Result cached}
-    PDA Proxy->>Celestia Node: blob.Submit(V. Encrypt. blobs, options)
-    Celestia Node->>PDA Proxy: Response{Inclusion Block Height}
-    PDA Proxy->>-JSON RPC Client: Response{Inclusion Block Height}
+    JSON RPC Client->>+PBS Proxy: blob.Submit(blobs, options)<br>{AUTH_TOKEN in header}
+    PBS Proxy->>PBS Proxy: Job Processing...<br>{If no DB entry, start new zkVM Job}
+    PBS Proxy->>-JSON RPC Client: Response{"Call back"}
+    PBS Proxy->>PBS Proxy: ...Job runs to completion...
+    JSON RPC Client->>+PBS Proxy:  blob.Submit(blobs, options)<br>{AUTH_TOKEN in header}
+    PBS Proxy->>PBS Proxy: Query Job DB<br>Done!<br>{Job Result cached}
+    PBS Proxy->>Celestia Node: blob.Submit(V. Encrypt. blobs, options)
+    Celestia Node->>PBS Proxy: Response{Inclusion Block Height}
+    PBS Proxy->>-JSON RPC Client: Response{Inclusion Block Height}
 ```
 
 #### (Try Decrypt) `blob.[Get|GetAll]`
@@ -83,15 +83,15 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant JSON RPC Client
-    participant PDA Proxy
+    participant PBS Proxy
     participant Celestia Node
 
-    JSON RPC Client->>+PDA Proxy: blob.Get(height, namespace, commitment)
-    PDA Proxy->>Celestia Node: <Passthrough>
-    Celestia Node->>PDA Proxy: Response{namespace,data,<br>share_version,commitment,index}
-    PDA Proxy->>PDA Proxy: *Try* deserialize & decrypt
-    PDA Proxy->>-JSON RPC Client: *Success* -> Response{...,decrypted bytes,...}
-    PDA Proxy->>JSON RPC Client: *Failure* -> <Passthrough>
+    JSON RPC Client->>+PBS Proxy: blob.Get(height, namespace, commitment)
+    PBS Proxy->>Celestia Node: <Passthrough>
+    Celestia Node->>PBS Proxy: Response{namespace,data,<br>share_version,commitment,index}
+    PBS Proxy->>PBS Proxy: *Try* deserialize & decrypt
+    PBS Proxy->>-JSON RPC Client: *Success* -> Response{...,decrypted bytes,...}
+    PBS Proxy->>JSON RPC Client: *Failure* -> <Passthrough>
 ```
 
 #### Transparent Proxy (all other calls)
@@ -99,13 +99,13 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant JSON RPC Client
-    participant PDA Proxy
+    participant PBS Proxy
     participant Celestia Node
 
-    JSON RPC Client->>+PDA Proxy: Request{<Anything else>}<br>{AUTH_TOKEN in header}
-    PDA Proxy->>Celestia Node: <Passthrough>
-    Celestia Node->>PDA Proxy: <Passthrough>
-    PDA Proxy->>-JSON RPC Client: Response{<Normal API response}
+    JSON RPC Client->>+PBS Proxy: Request{<Anything else>}<br>{AUTH_TOKEN in header}
+    PBS Proxy->>Celestia Node: <Passthrough>
+    Celestia Node->>PBS Proxy: <Passthrough>
+    PBS Proxy->>-JSON RPC Client: Response{<Normal API response}
 ```
 
 ## Operate
@@ -208,16 +208,16 @@ just docker-run
 
 # If you are only running:
 source .env
-mkdir -p $PDA_DB_PATH
+mkdir -p $PBS_DB_PATH
 # Note socket assumes running "normally" with docker managed by root
 docker run --rm -it \
   --user $(id -u):$(id -g) \
   -v /var/run/docker.sock:/var/run/docker.sock \
- -v $PDA_DB_PATH:$PDA_DB_PATH \
+ -v $PBS_DB_PATH:$PBS_DB_PATH \
   --env-file {{ env-settings }} \
-  --env RUST_LOG=pda_proxy=debug \
+  --env RUST_LOG=pbs_proxy=debug \
   --network=host \
-  -p $PDA_PORT:$PDA_PORT \
+  -p $PBS_PORT:$PBS_PORT \
   "$DOCKER_CONTAINER_NAME"
 ```
 
@@ -278,10 +278,10 @@ just docker-run
 
 ## Setup
 source .env
-mkdir -p $PDA_DB_PATH
+mkdir -p $PBS_DB_PATH
 
 ## Run (example)
-[docker|podman] run --rm -it -v $PDA_DB_PATH:$PDA_DB_PATH --env-file .env --env RUST_LOG=eq_service=debug --network=host -p $PDA_PORT:$PDA_PORT pda_proxy
+[docker|podman] run --rm -it -v $PBS_DB_PATH:$PBS_DB_PATH --env-file .env --env RUST_LOG=eq_service=debug --network=host -p $PBS_PORT:$PBS_PORT pbs_proxy
 ```
 
 Importantly, the DB should persist, and the container must have access to connect to the DA light client (likely port 26658) and Succinct network ports (HTTPS over 443).

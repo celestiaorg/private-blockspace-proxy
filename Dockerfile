@@ -56,8 +56,8 @@ RUN --mount=type=cache,id=target_cache,target=/app/target \
 # Build the final binary, embbeding ELF
 RUN --mount=type=cache,id=target_cache,target=/app/target \
     cargo build --release && \
-    strip /app/target/release/pda-proxy && \
-    cp target/release/pda-proxy /app/pda-proxy # pop out of cache
+    strip /app/target/release/pbs-proxy && \
+    cp target/release/pbs-proxy /app/pbs-proxy # pop out of cache
 
 ####################################################################################################
 FROM nvidia/cuda:12.9.1-base-ubuntu24.04 AS runtime
@@ -65,6 +65,6 @@ FROM nvidia/cuda:12.9.1-base-ubuntu24.04 AS runtime
 # SP1 CUDA support needs Docker-in-Docker to run `moongate-server` prover service
 # Internally run on localhost:3000
 COPY --from=base-dev /usr/bin/docker /usr/bin/docker
-COPY --from=builder /app/pda-proxy /usr/local/bin/pda-proxy
+COPY --from=builder /app/pbs-proxy /usr/local/bin/pbs-proxy
 
-ENTRYPOINT ["/usr/local/bin/pda-proxy"]
+ENTRYPOINT ["/usr/local/bin/pbs-proxy"]

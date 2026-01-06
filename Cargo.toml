@@ -9,7 +9,7 @@ edition = "2024"
 authors = ["Nuke <nuke-web3@proton.me>"]
 license = "MIT"
 homepage = "https://celestia.org"
-repository = "https://github.com/celestiaorg/eq-service"
+repository = "https://github.com/celestiaorg/private-blockspace-proxy"
 
 [workspace.dependencies]
 zkvm-common = { path = "zkVM/common", default-features = false, version = "0.3.0" }
