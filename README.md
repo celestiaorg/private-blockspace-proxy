@@ -1,4 +1,4 @@
-# Private Data Availability Proxy
+# Private Blockspace Proxy
 
 A [Celestia Data Availability (DA)](https://celestia.org) proxy, enabling use of the [canonical JSON RPC](https://node-rpc-docs.celestia.org/) but intercepting and [**_verifiably_** encrypting](./doc/verifiable_encryption.md) sensitive data before submission on the public DA network, and enable decryption on retrieval.
 Non-sensitive calls are unmodified.
@@ -18,24 +18,11 @@ Presently all HTTP requests to the proxy are transparently proxied to an upstrea
 - `blob.Submit` encrypts before proxy submission of a _signed transaction_ to upstream gRPC `app` endpoint.
 - `blob.Get` and `blob.GetAll` proxy result verifies the [Verifiable Encryption](./doc/verifiable_encryption.md) proof, and decrypts before forwarding to the client.
 
-## Known Limitations
-
-At time of writing, as it should be possible to change these limitations internally:
-
-- [ ] https://github.com/celestiaorg/pda-proxy/issues/11
-- [ ] https://github.com/celestiaorg/pda-proxy/issues/12
-
-It's possible to change these, but requires upstream involvement:
-
-- [Max blob size on Celestia](https://docs.celestia.org/how-to-guides/submit-data#maximum-blob-size) is presently ~2MB
-
-> Please [open an issue](https://github.com/celestiaorg/pda-proxy/issues) if you have any requests!
-
 ## Interact
 
 First you need to [configure](#configure) your environment and nodes.
 
-The PDA proxy depends on a connection to:
+The proxy depends on a connection to:
 
 1. A \[self\] hosted Celestia Data Availability (DA) Node and Consensus App Node to submit and retrieve (verifiable encrypted) blob data.
    - Easy integration with [QuickNode](https://www.quicknode.com/docs/celestia) for both nodes at one endpoint, token auth supported.
@@ -69,7 +56,7 @@ cd scripts
 ./test_example_data_file_via_curl.sh
 ```
 
-Celestia has many [API client libraries](https://docs.celestia.org/how-to-guides/submit-data#api) to build around a PDA proxy.
+Celestia has many [API client libraries](https://docs.celestia.org/how-to-guides/submit-data#api) to build around a proxy.
 
 ### Request Flow
 
@@ -176,10 +163,10 @@ The images are available:
 
 ```sh
 # ghcr:
-docker pull ghcr.io/celestiaorg/pda-proxy
+docker pull ghcr.io/celestiaorg/private-blockspace-proxy
 
 # Docker hub:
-docker pull celestiaorg/pda-proxy
+docker pull celestiaorg/private-blockspace-proxy
 ```
 
 _Don't forget you need to [configure your environment](#configure)_.
@@ -249,8 +236,8 @@ Then:
 1. Clone the repo
 
    ```sh
-   git clone https://github.com/your-repo-name/pda-proxy.git
-   cd pda-proxy
+   git clone https://github.com/your-repo-name/private-blockspace-proxy.git
+   cd private-blockspace-proxy
    ```
 
 1. Choose a Celestia Node
