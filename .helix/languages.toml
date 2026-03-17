@@ -1,6 +1,6 @@
 [[language]]
 name = "rust"
-formatter = { command = "rustfmt", args = ["+nightly"] }
+formatter = { command = "rustfmt", args = ["--edition", "2024"] }
 auto-format = false
 
 [language-server.rust-analyzer]
